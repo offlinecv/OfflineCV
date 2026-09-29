@@ -14,7 +14,7 @@ import {
   critiqueResumeWithLlm,
   type ResumeCritique,
 } from "./critique-resume.ts";
-import type { WebLlmEngine } from "./types.ts";
+import type { WebLlmEngine, ChatCompletionChunk } from "./types.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -72,6 +72,40 @@ function makeMockEngine(responses: string[]): WebLlmEngine {
           const content = responses[callIndex] ?? "";
           callIndex++;
           return { choices: [{ message: { content } }] };
+        }),
+      },
+    },
+  };
+}
+
+/**
+ * Build a streaming mock engine (#1095): each call to `create()` pops the
+ * next `responses` entry and streams it as several chunks (one per
+ * microtask), instead of resolving with the whole response at once.
+ */
+function makeStreamingMockEngine(responses: string[]): WebLlmEngine {
+  let callIndex = 0;
+  return {
+    chat: {
+      completions: {
+        create: vi.fn().mockImplementation(async () => {
+          const content = responses[callIndex] ?? "";
+          callIndex++;
+          const parts = 3;
+          const step = Math.ceil(content.length / parts) || 1;
+          const chunks: ChatCompletionChunk[] = [];
+          for (let i = 0; i < content.length; i += step) {
+            chunks.push({
+              choices: [{ delta: { content: content.slice(i, i + step) } }],
+            });
+          }
+          async function* iterate() {
+            for (const chunk of chunks) {
+              await Promise.resolve();
+              yield chunk;
+            }
+          }
+          return iterate();
         }),
       },
     },
@@ -312,5 +346,57 @@ describe("critiqueResumeWithLlm", () => {
 
     expect(result.bulletFindings).toHaveLength(0);
     expect(result.missingSections).toContain("summary");
+  });
+
+  it("reports increasing, cumulative token progress across both streamed passes (#1095)", async () => {
+    const bulletResponse = [
+      `{"bullet":"Led migration to Kubernetes","issue":"ok"}`,
+      `{"bullet":"Helped the team with deployments","issue":"weak_verb"}`,
+      `{"bullet":"Worked on various features","issue":"vague"}`,
+    ].join("\n");
+    const metaResponse = `{"missingSections":[],"summaryFeedback":"Fine."}`;
+    const engine = makeStreamingMockEngine([bulletResponse, metaResponse]);
+
+    const seen: Array<{ tokens: number; phase: string }> = [];
+    const result = await critiqueResumeWithLlm(PARSED_WITH_BULLETS, engine, {
+      onProgress: (info) => seen.push({ ...info }),
+    });
+
+    expect(result.bulletFindings).toHaveLength(3);
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.every((s) => s.phase === "critique")).toBe(true);
+    // Monotonically increasing overall, including across the pass boundary —
+    // the meta pass's reports continue from the bullet pass's last count.
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]!.tokens).toBeGreaterThan(seen[i - 1]!.tokens);
+    }
+  });
+
+  it("an aborted signal throws instead of degrading to a padded 'ok' result", async () => {
+    const bulletResponse = `{"bullet":"Led migration to Kubernetes","issue":"ok"}`;
+    const engine = makeStreamingMockEngine([bulletResponse, `{"missingSections":[]}`]);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      critiqueResumeWithLlm(PARSED_WITH_BULLETS, engine, {
+        signal: controller.signal,
+      }),
+    ).rejects.toBeTruthy();
+  });
+
+  it("aborting during the bullet pass never starts the meta pass", async () => {
+    const bulletResponse = [
+      `{"bullet":"Led migration to Kubernetes","issue":"ok"}`,
+      `{"bullet":"Helped the team with deployments","issue":"weak_verb"}`,
+    ].join("\n");
+    const engine = makeStreamingMockEngine([bulletResponse, `{"missingSections":[]}`]);
+    const controller = new AbortController();
+    await expect(
+      critiqueResumeWithLlm(PARSED_WITH_BULLETS, engine, {
+        signal: controller.signal,
+        onProgress: () => controller.abort(),
+      }),
+    ).rejects.toBeTruthy();
+    expect(engine.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 });

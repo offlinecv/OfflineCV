@@ -56,6 +56,7 @@ function controller(status: AnalysisController["status"]): AnalysisController {
     hasText: true,
     isBusy: false,
     run: () => Promise.resolve(),
+    stop: () => {},
   };
 }
 
@@ -91,9 +92,20 @@ describe("ResumeQualityPanel", () => {
     expect(el.textContent).toContain("Loading model");
   });
 
-  it("renders running status", () => {
-    const el = render({ kind: "running" });
-    expect(el.textContent).toContain("Analyzing");
+  it("renders running status with the active phase and a token count", () => {
+    const el = render({ kind: "running", phase: "parse", tokens: 42 });
+    expect(el.textContent).toContain("reading your résumé");
+    expect(el.textContent).toContain("42 tokens");
+  });
+
+  it("renders the critique phase distinctly, and a Stop control", () => {
+    const el = render({ kind: "running", phase: "critique", tokens: 7 });
+    expect(el.textContent).toContain("grading bullets");
+    expect(el.textContent).toContain("7 tokens");
+    const stopBtn = Array.from(el.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Stop"),
+    );
+    expect(stopBtn).toBeTruthy();
   });
 
   it("renders error status", () => {

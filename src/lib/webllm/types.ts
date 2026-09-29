@@ -48,12 +48,40 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * Which half of `useResumeAnalysisLlm`'s combined run is in flight (#1095):
+ * `"parse"` is `analyzeResumeWithLlm`, `"critique"` is `critiqueResumeWithLlm`.
+ * Shared here (not defined in the hook) because `streamCompletion`'s two
+ * callers each stamp their own phase onto the progress they report.
+ */
+export type AnalysisPhase = "parse" | "critique";
+
+/** A running token-count update from one of the two analysis passes. */
+export interface AnalysisProgressInfo {
+  /** Cumulative tokens streamed so far in this phase. */
+  tokens: number;
+  phase: AnalysisPhase;
+}
+
 export interface ChatCompletionRequest {
   messages: ChatMessage[];
   temperature?: number;
   max_tokens?: number;
+  /**
+   * Requests a streamed response (issue #1095). `WebLlmEngine.create()`'s
+   * declared return type stays the non-streaming `ChatCompletionResponse`
+   * below for every call site that doesn't set this — see the docblock on
+   * `streamCompletion` in `stream-completion.ts`, the one place that passes
+   * `stream: true` and narrows the real runtime shape itself.
+   */
+  stream?: boolean;
 }
 
 export interface ChatCompletionResponse {
   choices: Array<{ message: { content: string | null } }>;
+}
+
+/** One streamed chunk of a `stream: true` completion. */
+export interface ChatCompletionChunk {
+  choices: Array<{ delta: { content?: string | null } }>;
 }

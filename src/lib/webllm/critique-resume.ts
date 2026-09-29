@@ -43,9 +43,10 @@
  * src/components.
  */
 
-import type { WebLlmEngine } from "./types.ts";
+import type { AnalysisProgressInfo, WebLlmEngine } from "./types.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import { bulletHasMetric } from "../score/score.ts";
+import { streamCompletion } from "./stream-completion.ts";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -190,11 +191,20 @@ export function coerceMetaCritique(raw: Record<string, unknown>): {
   return { missingSections, summaryFeedback };
 }
 
+/** Threaded through both passes to stream progress and allow cancellation (#1095). */
+interface PassOptions {
+  signal?: AbortSignal;
+  onTokens?: (tokens: number) => void;
+}
+
 /**
  * Call the engine with a system+user prompt, returning the raw text content.
- * NEVER throws — on any engine failure it logs and returns an empty string so
- * the caller's parse step degrades to safe defaults. `label` names the pass in
- * the warning so failures stay diagnosable.
+ * NEVER throws for an ordinary engine failure — it logs and returns an empty
+ * string so the caller's parse step degrades to safe defaults. `label` names
+ * the pass in the warning so failures stay diagnosable. The one exception is
+ * cancellation (#1095): when `opts.signal` fires mid-stream this DOES throw,
+ * so the abort reaches `useResumeAnalysisLlm.ts`'s per-phase handling instead
+ * of being swallowed into a silent "ok" finding.
  */
 async function callEngine(
   engine: WebLlmEngine,
@@ -202,18 +212,20 @@ async function callEngine(
   userPrompt: string,
   maxTokens: number,
   label: string,
+  opts: PassOptions = {},
 ): Promise<string> {
   try {
-    const response = await engine.chat.completions.create({
-      messages: [
+    return await streamCompletion(
+      engine,
+      [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0,
-      max_tokens: maxTokens,
-    });
-    return response.choices[0]?.message?.content ?? "";
+      maxTokens,
+      opts,
+    );
   } catch (err) {
+    if (opts.signal?.aborted) throw err;
     console.warn(`[critique-resume] ${label} pass failed:`, err);
     return "";
   }
@@ -312,6 +324,7 @@ function reconcileFindings(findings: BulletFinding[]): {
 async function runBulletPass(
   bullets: string[],
   engine: WebLlmEngine,
+  opts: PassOptions = {},
 ): Promise<BulletFinding[]> {
   if (bullets.length === 0) return [];
   const userPrompt = bullets.map((b, i) => `${i + 1}. ${b}`).join("\n");
@@ -323,6 +336,7 @@ async function runBulletPass(
     `Bullets:\n${userPrompt}`,
     maxTokens,
     "bullet",
+    opts,
   );
   return parseBulletResponse(raw, bullets);
 }
@@ -369,6 +383,7 @@ async function runMetaPass(
   parsed: HeuristicParsedResume,
   bulletCount: number,
   engine: WebLlmEngine,
+  opts: PassOptions = {},
 ): Promise<{ missingSections: string[]; summaryFeedback?: string }> {
   const metaContent = buildMetaContent(parsed, bulletCount);
   const raw = await callEngine(
@@ -377,6 +392,7 @@ async function runMetaPass(
     `Resume sections:\n${metaContent}`,
     256,
     "meta",
+    opts,
   );
   return parseMetaResponse(raw);
 }
@@ -388,25 +404,53 @@ async function runMetaPass(
  *
  * Accepts the heuristic (or LLM-overridden) parsed resume and the already-
  * loaded engine. Returns a `ResumeCritique` with per-bullet findings and
- * missing-section flags. This function NEVER throws — on any engine or parse
- * failure it returns a safe empty shape so the UI degrades gracefully.
+ * missing-section flags. On any engine or parse failure it returns a safe
+ * empty shape so the UI degrades gracefully. The one exception is
+ * cancellation (#1095): when `opts.signal` fires mid-stream this DOES throw,
+ * so the caller's per-phase abort/deadline handling (`useResumeAnalysisLlm.ts`)
+ * sees it rather than a silently-empty "done" result.
  *
  * Two passes:
  *   1. Bullet critique — one JSON object per line.
  *   2. Meta critique — one JSON object covering missing sections + summary.
+ *
+ * Both passes stream (#1095): `onProgress` reports a cumulative token count
+ * across the two — the meta pass's reports continue from where the bullet
+ * pass left off, so the number in the UI only climbs, never resets mid-run.
+ * `signal`, if aborted, is checked at each pass's boundary AND mid-stream
+ * inside it (`callEngine` → `streamCompletion`); an abort during the bullet
+ * pass throws before the meta pass ever starts.
  */
 export async function critiqueResumeWithLlm(
   parsed: HeuristicParsedResume,
   engine: WebLlmEngine,
+  opts: {
+    signal?: AbortSignal;
+    /** Streamed token-count progress (#1095) — always reports `phase: "critique"`. */
+    onProgress?: (info: AnalysisProgressInfo) => void;
+  } = {},
 ): Promise<ResumeCritique> {
+  const { signal, onProgress } = opts;
   const bullets = collectBullets(parsed);
-  const rawBulletFindings = await runBulletPass(bullets, engine);
+  let bulletTokens = 0;
+  const rawBulletFindings = await runBulletPass(bullets, engine, {
+    signal,
+    onTokens: (tokens) => {
+      bulletTokens = tokens;
+      onProgress?.({ tokens, phase: "critique" });
+    },
+  });
   const { findings: bulletFindings, metricOverrides } =
     reconcileFindings(rawBulletFindings);
   const { missingSections, summaryFeedback } = await runMetaPass(
     parsed,
     bullets.length,
     engine,
+    {
+      signal,
+      onTokens: (tokens) =>
+        onProgress?.({ tokens: bulletTokens + tokens, phase: "critique" }),
+    },
   );
   return { bulletFindings, missingSections, summaryFeedback, metricOverrides };
 }

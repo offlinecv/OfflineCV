@@ -86,9 +86,18 @@ export function ResumeQualityPanel({
       )}
 
       {status.kind === "running" && (
-        <p className="text-sm text-content-secondary" role="status">
-          Analyzing…
-        </p>
+        <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-subtle p-2">
+          <p className="text-sm text-content-secondary" role="status">
+            {status.phase === "parse"
+              ? `Analyzing… reading your résumé (${status.tokens} tokens)`
+              : `Analyzing… grading bullets (${status.tokens} tokens)`}
+          </p>
+          <div>
+            <Button variant="secondary" size="sm" onClick={controller.stop}>
+              Stop
+            </Button>
+          </div>
+        </div>
       )}
 
       {status.kind === "error" && (

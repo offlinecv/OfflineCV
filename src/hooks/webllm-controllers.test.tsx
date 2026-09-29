@@ -105,6 +105,7 @@ vi.mock("../lib/analytics.ts", () => ({
   trackDisagreementsFound: vi.fn(),
   trackLlmFallbackRan: vi.fn(),
   trackCritiqueRan: vi.fn(),
+  trackAnalysisAborted: vi.fn(),
 }));
 
 import { useResumeAnalysisLlm } from "./useResumeAnalysisLlm.ts";
@@ -124,6 +125,7 @@ import {
   trackLlmParseRan,
   trackDisagreementsFound,
   trackCritiqueRan,
+  trackAnalysisAborted,
 } from "../lib/analytics.ts";
 
 /** A graded bullet stub. Only `id` and `text` take part in the critique join. */
@@ -283,10 +285,12 @@ describe("useResumeAnalysisLlm", () => {
     expect(critiqueResumeWithLlm).toHaveBeenCalledWith(
       edited.canonical.fields,
       expect.anything(),
+      expect.anything(),
     );
     // ...while the parse/diff pass still read the extractor's ORIGINAL text.
     expect(analyzeResumeWithLlm).toHaveBeenCalledWith(
       { rawText: edited.rawText, markdown: edited.markdown },
+      expect.anything(),
       expect.anything(),
     );
 
@@ -386,6 +390,101 @@ describe("useResumeAnalysisLlm", () => {
       root.render(<Probe r={result()} parseKey={{}} />);
     });
     expect(sink.current!.status.kind).toBe("idle");
+  });
+
+  it("Stop aborts the running phase, returns to idle, and releases the inference lock (#1095)", async () => {
+    const r = result();
+    // A stand-in for the real streaming implementation's contract (see
+    // `stream-completion.ts`): never resolves on its own, but rejects the
+    // moment `signal` fires — exactly what a Stop click should trigger.
+    vi.mocked(analyzeResumeWithLlm).mockImplementationOnce(
+      (_input, _engine, opts) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Analysis aborted.", "AbortError"));
+          });
+        }),
+    );
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    await mount(() => useResumeAnalysisLlm(r, r), sink);
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = sink.current!.run();
+    });
+    // Flush microtasks until the run reaches the "running" phase (consent →
+    // acquire → loadEngine → controller creation all resolve on the
+    // microtask queue with these mocks).
+    for (let i = 0; i < 20 && sink.current!.status.kind !== "running"; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    expect(sink.current!.status.kind).toBe("running");
+
+    await act(async () => {
+      sink.current!.stop();
+      await runPromise;
+    });
+
+    expect(sink.current!.status.kind).toBe("idle");
+    expect(releaseInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+    expect(trackAnalysisAborted).toHaveBeenCalledWith({
+      model: SHIPPED_MODEL.id,
+      phase: "parse",
+      reason: "user",
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("a phase exceeding its deadline ends in kind: 'error' with the memory hint (#1095)", async () => {
+    vi.useFakeTimers();
+    try {
+      const r = result();
+      vi.mocked(analyzeResumeWithLlm).mockImplementationOnce(
+        (_input, _engine, opts) =>
+          new Promise((_resolve, reject) => {
+            opts?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Analysis aborted.", "AbortError"));
+            });
+          }),
+      );
+      const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+        current: null,
+      };
+      await mount(() => useResumeAnalysisLlm(r, r), sink);
+
+      let runPromise!: Promise<void>;
+      await act(async () => {
+        runPromise = sink.current!.run();
+      });
+      for (let i = 0; i < 20 && sink.current!.status.kind !== "running"; i++) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+      expect(sink.current!.status.kind).toBe("running");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4 * 60 * 1000 + 1);
+        await runPromise;
+      });
+
+      expect(sink.current!.status.kind).toBe("error");
+      if (sink.current!.status.kind === "error") {
+        expect(sink.current!.status.message).toContain("longer than expected");
+      }
+      expect(trackAnalysisAborted).toHaveBeenCalledWith({
+        model: SHIPPED_MODEL.id,
+        phase: "parse",
+        reason: "deadline",
+        durationMs: expect.any(Number),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

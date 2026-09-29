@@ -53,13 +53,18 @@ import {
 } from "../lib/heuristics/disagreement.ts";
 import { projectLlmDiff } from "../lib/heuristics/projections.ts";
 import {
+  trackAnalysisAborted,
   trackCritiqueRan,
   trackDisagreementsFound,
   trackLlmParseRan,
 } from "../lib/analytics.ts";
 import { requestModelConsent } from "./useModelConsent.ts";
 import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
-import type { ProgressUpdate, WebGpuCapability } from "../lib/webllm/types.ts";
+import type {
+  AnalysisPhase,
+  ProgressUpdate,
+  WebGpuCapability,
+} from "../lib/webllm/types.ts";
 import type {
   CascadeResult,
   LayoutTrigger,
@@ -77,7 +82,13 @@ export interface AnalysisDone {
 export type AnalysisStatus =
   | { kind: "idle" }
   | { kind: "loading"; progress: ProgressUpdate }
-  | { kind: "running" }
+  /**
+   * `phase` + `tokens` (#1095) replace the old static "Analyzing…" line: the
+   * panel shows which of the two passes is running and a token count that
+   * visibly climbs, so a slow-but-alive run reads differently from a hung
+   * one. `tokens` resets to 0 at the start of each phase.
+   */
+  | { kind: "running"; phase: AnalysisPhase; tokens: number }
   | ({ kind: "done" } & AnalysisDone)
   | { kind: "error"; message: string };
 
@@ -104,6 +115,15 @@ export interface AnalysisController {
   isBusy: boolean;
   /** Start the opt-in combined analysis. No-op while already busy. */
   run: () => Promise<void>;
+  /**
+   * Cancel a `running` pass (#1095) — stops consuming the current phase's
+   * stream and returns `status` to `idle`. No-op outside `kind: "running"`
+   * (in particular, it does not cancel the model load — `loading` has no
+   * cancel path today). The already-in-flight engine call may keep running
+   * in the background; see `stream-completion.ts`'s docblock for why this
+   * deliberately does NOT call the engine-wide `interruptGenerate()`.
+   */
+  stop: () => void;
 }
 
 // ── CTA copy ──────────────────────────────────────────────────────────────────
@@ -146,6 +166,42 @@ function tallyKinds(disagreements: readonly ParseDisagreement[]): KindTally {
   };
   for (const d of disagreements) tally[TALLY_FIELD[d.kind]]++;
   return tally;
+}
+
+// ── Cancellation + deadline (#1095) ───────────────────────────────────────────
+
+/**
+ * Wall-clock budget for ONE phase (parse OR critique), not the whole run.
+ * The issue's field report: a swapping 8 GB M1 took 10–15 minutes total for
+ * both passes combined on the shipped 2B model (~3–5k tokens at ~5 tok/s);
+ * a healthy machine finishes both in 1–3 minutes. 4 minutes gives a single
+ * phase roughly the healthy-machine's full-run budget again before treating
+ * it as hung, without making a genuinely slow-but-alive device wait through
+ * the full 10–15 minute worst case with zero feedback.
+ */
+const PHASE_DEADLINE_MS = 4 * 60 * 1000;
+
+const DEADLINE_MESSAGE =
+  "This is taking longer than expected — the on-device model may be short on memory. Close other tabs and try again.";
+
+type AbortReason = "user" | "deadline";
+
+/**
+ * Thrown by `runPhase` (below) when its `AbortController` fires — either the
+ * user clicked Stop or the phase's own deadline timer elapsed. Distinct from
+ * every other error `run()` can catch so the `catch` block can route the two
+ * outcomes differently: `"user"` returns to `idle` silently, `"deadline"`
+ * surfaces `kind: "error"` with a memory hint.
+ */
+class PhaseAbortedError extends Error {
+  constructor(
+    readonly phase: AnalysisPhase,
+    readonly reason: AbortReason,
+    readonly durationMs: number,
+  ) {
+    super(`Analysis aborted during ${phase} (${reason})`);
+    this.name = "PhaseAbortedError";
+  }
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -204,6 +260,16 @@ export function useResumeAnalysisLlm(
   // runs behind one consent. Released on decline and on every finish.
   const inFlightRef = useRef(false);
 
+  // The active run's cancellation handle (#1095) — one `AbortController` per
+  // `run()` call, shared by both phases so `stop()` cancels whichever is
+  // current. `null` outside a run (including during model load, which has no
+  // cancel path yet — see `stop`'s docblock).
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const stop = useCallback(() => {
+    abortControllerRef.current?.abort("user" satisfies AbortReason);
+  }, []);
+
   const run = useCallback(async () => {
     if (inFlightRef.current || isBusy) return;
     inFlightRef.current = true;
@@ -221,23 +287,68 @@ export function useResumeAnalysisLlm(
         const engine = await loadEngine(modelId, (progress) => {
           setStatus({ kind: "loading", progress });
         });
-        setStatus({ kind: "running" });
 
-        const combined = await analyzeResumeWithLlm(
-          {
-            rawText: result.rawText,
-            ...(result.markdown ? { markdown: result.markdown } : {}),
-          },
-          engine,
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
+        // Runs `fn` under its own `PHASE_DEADLINE_MS` timer, on the shared
+        // `controller` so `stop()` (fired from either phase) always hits the
+        // one that's current. Streamed token progress lands on `setStatus`
+        // via `fn`'s own `onProgress` callback; this wrapper only owns the
+        // phase's start marker, its deadline, and turning an abort into a
+        // `PhaseAbortedError` the outer `catch` can route.
+        const runPhase = async <T,>(
+          phase: AnalysisPhase,
+          fn: (signal: AbortSignal) => Promise<T>,
+        ): Promise<T> => {
+          setStatus({ kind: "running", phase, tokens: 0 });
+          const phaseStart = Date.now();
+          const timer = setTimeout(() => {
+            controller.abort("deadline" satisfies AbortReason);
+          }, PHASE_DEADLINE_MS);
+          try {
+            return await fn(controller.signal);
+          } catch (err) {
+            if (controller.signal.aborted) {
+              const reason: AbortReason =
+                controller.signal.reason === "user" ? "user" : "deadline";
+              throw new PhaseAbortedError(
+                phase,
+                reason,
+                Date.now() - phaseStart,
+              );
+            }
+            throw err;
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
+        const combined = await runPhase("parse", (signal) =>
+          analyzeResumeWithLlm(
+            {
+              rawText: result.rawText,
+              ...(result.markdown ? { markdown: result.markdown } : {}),
+            },
+            engine,
+            {
+              signal,
+              onProgress: (info) =>
+                setStatus({ kind: "running", ...info }),
+            },
+          ),
         );
 
         // The critique must grade the wording on the page, not the extractor's
         // original text `combined` was built from (#1036) — re-run it over the
         // current (possibly edited) canonical fields. `combined.critique` is
         // discarded.
-        const critique = await critiqueResumeWithLlm(
-          result.canonical.fields,
-          engine,
+        const critiqueStart = Date.now();
+        const critique = await runPhase("critique", (signal) =>
+          critiqueResumeWithLlm(result.canonical.fields, engine, {
+            signal,
+            onProgress: (info) => setStatus({ kind: "running", ...info }),
+          }),
         );
 
         // ── Telemetry: the LLM pass ran (sets llm_ran:true downstream). ──
@@ -278,6 +389,7 @@ export function useResumeAnalysisLlm(
           flaggedCount,
           missingSectionCount: critique.missingSections.length,
           metricOverrides: critique.metricOverrides ?? 0,
+          durationMs: Date.now() - critiqueStart,
         });
 
         setStatus({
@@ -286,14 +398,29 @@ export function useResumeAnalysisLlm(
           critique,
         });
       } catch (err) {
-        setStatus({
-          kind: "error",
-          message:
-            err instanceof Error
-              ? err.message
-              : "Couldn't load the on-device model",
-        });
+        if (err instanceof PhaseAbortedError) {
+          trackAnalysisAborted({
+            model: modelId,
+            phase: err.phase,
+            reason: err.reason,
+            durationMs: err.durationMs,
+          });
+          setStatus(
+            err.reason === "user"
+              ? { kind: "idle" }
+              : { kind: "error", message: DEADLINE_MESSAGE },
+          );
+        } else {
+          setStatus({
+            kind: "error",
+            message:
+              err instanceof Error
+                ? err.message
+                : "Couldn't load the on-device model",
+          });
+        }
       } finally {
+        abortControllerRef.current = null;
         releaseInference(modelId);
       }
     } finally {
@@ -303,5 +430,5 @@ export function useResumeAnalysisLlm(
 
   const isAvailable = capability === "available" && hasText;
 
-  return { status, isAvailable, capability, hasText, isBusy, run };
+  return { status, isAvailable, capability, hasText, isBusy, run, stop };
 }
