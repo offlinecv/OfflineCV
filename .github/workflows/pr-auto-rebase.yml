@@ -211,8 +211,15 @@ jobs:
           # No npm cache: its storage hosts would widen the egress allowlist.
           node-version: '20'
 
+      # On a conflict this runs with the markers still in the tree, and
+      # packages/core's `prepare` builds src/ with tsc, which dies on them
+      # (TS1185) before the agent can resolve anything. --ignore-scripts alone
+      # does not stop it: npm 10 still runs a linked workspace's `prepare`, so
+      # the workspace is left unlinked too. Nothing the agent runs needs
+      # either (verify:quick never imports @offlinecv/core), and no pre-push
+      # hook is installed.
       - if: steps.prep.outputs.agent == 'true'
-        run: npm ci
+        run: npm ci --ignore-scripts --workspaces=false
 
       - name: Build the prompt (PR text via a file only)
         if: steps.prep.outputs.agent == 'true'

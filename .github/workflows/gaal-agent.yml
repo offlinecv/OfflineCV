@@ -252,8 +252,15 @@ jobs:
           # No npm cache: its storage hosts would widen the egress allowlist.
           node-version: '20'
 
+      # On a conflict this runs with the markers still in the tree, and
+      # packages/core's `prepare` builds src/ with tsc, which dies on them
+      # (TS1185) before the agent can resolve anything. --ignore-scripts alone
+      # does not stop it: npm 10 still runs a linked workspace's `prepare`, so
+      # the workspace is left unlinked too. Nothing the agent runs needs
+      # either (verify:quick never imports @offlinecv/core), and no pre-push
+      # hook is installed.
       - if: steps.prep.outputs.agent == 'true'
-        run: npm ci
+        run: npm ci --ignore-scripts --workspaces=false
 
       - name: Build the prompt (issue text via env only)
         if: steps.prep.outputs.agent == 'true'
@@ -405,7 +412,8 @@ jobs:
             commit -q --author="$APP_BOT <$bot_email>" -F "$msg"
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
-          # `npm ci` installed the repo's pre-push hook; CI runs `verify` on the push anyway.
+          # No hook is installed (`npm ci --ignore-scripts`), but skip one regardless:
+          # CI runs `verify` on the push anyway.
           OFFLINECV_SKIP_HOOKS=1 git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
           if gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
             note "Gaal re-ran for #$NUMBER and force-pushed."
