@@ -8,9 +8,9 @@
  * domain-agnostic `storage/watched.ts` module — mirroring `board-cache.ts`,
  * the one other job-search module that does this (see the exception note on
  * `storage/index.ts`'s barrel docblock). There is no such module because this
- * store has exactly one domain consumer (`useCompanyTargets`) and one bridge
- * reader (`watched-companies-bridge.ts`), both in this repo, unlike jobs and
- * letters, which are public producer contracts other repos write against.
+ * store has exactly one domain consumer, `useCompanyTargets`, in this repo,
+ * unlike jobs and letters, which are public producer contracts other repos
+ * write against.
  *
  * Key shape `${ats}:${slug}` — the same natural-key reasoning as
  * `boardCacheKey` in `board-cache.ts` and `companyKey` in
