@@ -76,3 +76,12 @@ You can also ask for a rebase yourself, on any PR, with a comment:
 | `/gaal rebase` | Brings the PR up to date with its base branch. A clean rebase runs no agent; a conflict is resolved by Gaal. |
 | `/gaal <what to change>` | Revises the PR. It rebases first too, so it also clears a conflict. |
 | `/gaal help` | Lists the commands. |
+
+## The `gaal` label on an issue
+
+`gaal` on an issue means Gaal is acting on it right now: a run is going, or its PR is open. The workflow removes the label whenever that stops being true while the issue stays open, and leaves a comment saying why:
+
+- the run was refused, failed (for example, it ran past its turn budget), or produced no changes;
+- its PR was closed unmerged, or merged without closing the issue (a partial fix that says `Refs #N`).
+
+So the labelled issues are always the live ones. To retry, fix the cause (usually by sharpening or splitting the issue), then add `gaal` again.

@@ -41,6 +41,11 @@
 #      A run that needs a new host fails loudly; add it to `allowed-endpoints`.
 # Status comments use github.token, which fires no events, so they cannot
 # start pr-revise.yml the way an app-token comment would.
+#
+# `gaal` on an issue means "Gaal is acting on this": a run is going or its PR is
+# open. Whenever that stops being true without the issue closing, the label comes
+# off (release-label step, release-on-close job), so the labelled set is always
+# the live set and re-adding the label is how to retry.
 name: Gaal agent
 
 on:
@@ -48,6 +53,8 @@ on:
     types: [labeled]
   issue_comment:
     types: [created]
+  pull_request:
+    types: [closed]
 
 permissions:
   contents: read
@@ -342,6 +349,9 @@ jobs:
 
       - name: Run Gaal
         if: steps.prep.outputs.agent == 'true'
+        # Under the job's 60: a job timeout cancels everything after it, so this
+        # leaves room for the publish and release-label steps to still run.
+        timeout-minutes: 45
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         env:
           # Telemetry hosts are blocked anyway; skip them instead of retrying.
@@ -376,6 +386,7 @@ jobs:
 
       - name: Fold into one commit, push, and open / update the PR
         if: steps.gate.outputs.mode == 'issue'
+        id: publish
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           GITHUB_TOKEN_RO: ${{ github.token }}
@@ -415,7 +426,11 @@ jobs:
           # No hook is installed (`npm ci --ignore-scripts`), but skip one regardless:
           # CI runs `verify` on the push anyway.
           OFFLINECV_SKIP_HOOKS=1 git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
-          if gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
+          # Only an OPEN same-repo PR carries the push: a closed one (the retry after
+          # closing it) needs a new PR, and a fork can name its branch the same.
+          open=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json headRepositoryOwner \
+            --jq "map(select(.headRepositoryOwner.login == \"${REPO%%/*}\")) | length")
+          if [ "$open" -gt 0 ]; then
             note "Gaal re-ran for #$NUMBER and force-pushed."
           else
             # The agent's description; failing that, the commit body with its
@@ -434,6 +449,40 @@ jobs:
             } > "$body"
             gh pr create --repo "$REPO" --base main --head "$BRANCH" \
               --title "$(head -1 "$msg")" --body-file "$body"
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          # release-on-close may have taken the label off mid-run (an older PR from this
+          # branch closed meanwhile). github.token fires no `labeled` event, so putting
+          # it back cannot start another run.
+          GH_TOKEN="$GITHUB_TOKEN_RO" gh issue edit "$NUMBER" --repo "$REPO" --add-label gaal
+
+      # `gaal` stays on only while a PR carries the work (see the header). Every
+      # other ending (a refused gate, a failed or over-budget agent, no changes,
+      # a blocked path) takes it off, so re-adding it is a clean retry.
+      - name: Release the gaal label when no PR carries this run
+        if: always() && github.event_name == 'issues' && steps.publish.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # An earlier run's PR may still be open; then the label still means something.
+          # A failed lookup keeps the label too: a stale label is cheaper than stripping
+          # a live one.
+          if ! open=$(gh pr list --repo "$REPO" --head "gaal/issue-$NUMBER" --state open --json headRepositoryOwner \
+                        --jq "map(select(.headRepositoryOwner.login == \"${REPO%%/*}\")) | length"); then
+            echo "::warning::Could not look up PRs from gaal/issue-$NUMBER; keeping the label."
+            exit 0
+          fi
+          if [ "$open" -gt 0 ]; then
+            echo "An open PR from gaal/issue-$NUMBER still carries the work; keeping the label."
+            exit 0
+          fi
+          gh issue edit "$NUMBER" --repo "$REPO" --remove-label gaal
+          # A clean ending (no changes) has already said so in its own comment.
+          if [ "$JOB_STATUS" != success ]; then
+            gh issue comment "$NUMBER" --repo "$REPO" --body "Gaal stopped without opening a PR ([run]($RUN_URL)), so \`gaal\` is removed. Fix the cause (the run's first error says what it was), then add the label again to retry."
           fi
 
       # A revision: the replayed PR plus the agent's edits, folded into the PR's
@@ -482,3 +531,64 @@ jobs:
               exit 1 ;;
             *) echo "::error::unexpected publish result: $result"; exit 1 ;;
           esac
+
+  # A Gaal PR that closes without closing its issue (closed unmerged, or merged
+  # as a partial `Refs #N`) leaves nothing acting on the issue, so the label
+  # comes off. Same-repo branches only: a fork can name its branch gaal/issue-N.
+  release-on-close:
+    if: >
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.pull_request.head.ref, 'gaal/issue-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Release the gaal label if the issue outlived its PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          CLOSED_AT: ${{ github.event.pull_request.closed_at }}
+        run: |
+          set -euo pipefail
+          n=${HEAD_REF#gaal/issue-}
+          case "$n" in ''|*[!0-9]*) echo "not a Gaal issue branch: $HEAD_REF"; exit 0 ;; esac
+          # A merged `Closes #N` closes the issue asynchronously, so it may still read
+          # OPEN here; the PR's closing references are the reliable signal.
+          if [ "$MERGED" = true ] &&
+             gh pr view "$PR" --repo "$REPO" --json closingIssuesReferences \
+               --jq '.closingIssuesReferences[].number' | grep -qx "$n"; then
+            echo "#$PR closes #$n; nothing to release."
+            exit 0
+          fi
+          issue=$(gh issue view "$n" --repo "$REPO" --json state,labels)
+          [ "$(jq -r .state <<<"$issue")" = OPEN ] || exit 0
+          jq -e '.labels | any(.name == "gaal")' <<<"$issue" >/dev/null || exit 0
+          # No coordination with run-gaal (a shared concurrency group would let this
+          # job evict a queued run), so recheck for live work right before removing:
+          # a label added after this PR closed is a retry, and a newer open PR from
+          # the branch carries the work. run-gaal's publish also re-adds the label.
+          added=$(gh api "repos/$REPO/issues/$n/events" --paginate \
+            --jq '[.[] | select(.event == "labeled" and .label.name == "gaal") | .created_at] | last // empty' | tail -1)
+          if [[ "$added" > "$CLOSED_AT" ]]; then
+            echo "gaal was re-added at $added, after #$PR closed at $CLOSED_AT; a retry is live."
+            exit 0
+          fi
+          open=$(gh pr list --repo "$REPO" --head "$HEAD_REF" --state open --json headRepositoryOwner \
+            --jq "map(select(.headRepositoryOwner.login == \"${REPO%%/*}\")) | length")
+          if [ "$open" -gt 0 ]; then
+            echo "Another open PR from $HEAD_REF carries the work; keeping the label."
+            exit 0
+          fi
+          gh issue edit "$n" --repo "$REPO" --remove-label gaal
+          if [ "$MERGED" = true ]; then
+            outcome="merged without closing it"
+          else
+            outcome="was closed unmerged"
+          fi
+          gh issue comment "$n" --repo "$REPO" --body "Gaal's PR #$PR $outcome, so nothing is acting on this issue and \`gaal\` is removed. Close the issue, or update it and add the label again for another run."
