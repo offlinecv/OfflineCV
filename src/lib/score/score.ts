@@ -280,7 +280,14 @@ const WORD_YEAR_TOKEN = new RegExp(
  *  category as the year guard: "Led Six Sigma initiatives" quantifies nothing. */
 const NON_QUANTIFYING_PHRASE = /\b(?:six\s+sigma|big\s+four)\b/gi;
 
-function bulletHasMetric(text: string): boolean {
+/**
+ * True when `text` carries a number, currency amount, percentage, multiplier,
+ * or spelled-out quantity in a quantifying position. Exported so callers
+ * outside the scorer (the on-device critique post-processor, #1094) can defer
+ * to this definition of "has a metric" instead of re-implementing it — the
+ * scorer stays the single source of truth.
+ */
+export function bulletHasMetric(text: string): boolean {
   if (STRONG_METRIC_PATTERNS.some((p) => p.test(text))) return true;
   const stripped = text.replace(YEAR_TOKEN, "");
   if (ANY_DIGIT.test(stripped)) return true;

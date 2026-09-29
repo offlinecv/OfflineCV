@@ -382,18 +382,25 @@ export function trackRenderError(args: { errorName: string }): void {
  * The on-device LLM content-quality critique ran (#244). Emits a single
  * anonymized event carrying the model id, the total bullet count judged, and
  * the count of non-ok findings. No bullet text, no field values, no PII.
+ *
+ * `metricOverrides` (#1094) is the count of `no_quantification` findings the
+ * scorer's `bulletHasMetric` disagreed with and downgraded to `ok` — a
+ * standing rate here is the signal that the prompt tightening in
+ * `critique-resume.ts` needs another pass.
  */
 export function trackCritiqueRan(args: {
   model: string;
   bulletCount: number;
   flaggedCount: number;
   missingSectionCount: number;
+  metricOverrides: number;
 }): void {
   track("llm_critique_ran", {
     model: args.model,
     bullet_count: args.bulletCount,
     flagged_count: args.flaggedCount,
     missing_section_count: args.missingSectionCount,
+    metric_overrides: args.metricOverrides,
   });
 }
 

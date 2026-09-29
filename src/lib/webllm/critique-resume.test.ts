@@ -208,6 +208,102 @@ describe("critiqueResumeWithLlm", () => {
     expect(result.bulletFindings[1]!.issue).toBe("ok");
   });
 
+  it("downgrades a no_quantification finding the scorer counts as metric-bearing (#1094)", async () => {
+    const parsed: HeuristicParsedResume = {
+      ...PARSED_EMPTY,
+      experience: [
+        {
+          company: "Acme Corp",
+          title: "Engineer",
+          description: "Reduced p99 latency by 87% through caching",
+        },
+      ],
+    };
+    const bulletResponse = `{"bullet":"Reduced p99 latency by 87% through caching","issue":"no_quantification","suggestion":"Reduced p99 latency by 87% through caching."}`;
+    const metaResponse = `{"missingSections":[]}`;
+
+    const engine = makeMockEngine([bulletResponse, metaResponse]);
+    const result = await critiqueResumeWithLlm(parsed, engine);
+
+    expect(result.bulletFindings).toHaveLength(1);
+    expect(result.bulletFindings[0]!.issue).toBe("ok");
+    expect(result.bulletFindings[0]!.suggestion).toBeUndefined();
+    expect(result.metricOverrides).toBe(1);
+  });
+
+  it("strips a numbered-list marker from the source bullet before the metric check (#1094)", async () => {
+    const parsed: HeuristicParsedResume = {
+      ...PARSED_EMPTY,
+      experience: [
+        {
+          company: "Acme Corp",
+          title: "Engineer",
+          description: "1. Assisted with team scheduling",
+        },
+      ],
+    };
+    const bulletResponse = `{"bullet":"Assisted with team scheduling","issue":"no_quantification","suggestion":"Coordinated scheduling for a team of 5"}`;
+    const metaResponse = `{"missingSections":[]}`;
+
+    const engine = makeMockEngine([bulletResponse, metaResponse]);
+    const result = await critiqueResumeWithLlm(parsed, engine);
+
+    // "1." must not survive as the source bullet's leading digit, or
+    // bulletHasMetric would treat it as a metric and mask this finding.
+    expect(result.bulletFindings[0]!.bullet).toBe(
+      "Assisted with team scheduling",
+    );
+    expect(result.bulletFindings[0]!.issue).toBe("no_quantification");
+    expect(result.metricOverrides).toBe(0);
+  });
+
+  it("reconciles against the source bullet, not the model's echoed bullet field (#1094)", async () => {
+    const parsed: HeuristicParsedResume = {
+      ...PARSED_EMPTY,
+      experience: [
+        {
+          company: "Acme Corp",
+          title: "Engineer",
+          description: "Improved onboarding",
+        },
+      ],
+    };
+    // Model copies the prompt's "1. " numbering into its own `bullet` field.
+    const bulletResponse = `{"bullet":"1. Improved onboarding","issue":"no_quantification","suggestion":"Improved onboarding is now measured"}`;
+    const metaResponse = `{"missingSections":[]}`;
+
+    const engine = makeMockEngine([bulletResponse, metaResponse]);
+    const result = await critiqueResumeWithLlm(parsed, engine);
+
+    // The finding's bullet text is the true source, not the model's echo,
+    // and the "no_quantification" verdict survives (no false metric).
+    expect(result.bulletFindings[0]!.bullet).toBe("Improved onboarding");
+    expect(result.bulletFindings[0]!.issue).toBe("no_quantification");
+    expect(result.metricOverrides).toBe(0);
+  });
+
+  it("drops a suggestion that is just the bullet plus a trailing period", async () => {
+    const parsed: HeuristicParsedResume = {
+      ...PARSED_EMPTY,
+      experience: [
+        {
+          company: "Acme Corp",
+          title: "Engineer",
+          description: "Helped the team with various tasks",
+        },
+      ],
+    };
+    const bulletResponse = `{"bullet":"Helped the team with various tasks","issue":"weak_verb","suggestion":"Helped the team with various tasks."}`;
+    const metaResponse = `{"missingSections":[]}`;
+
+    const engine = makeMockEngine([bulletResponse, metaResponse]);
+    const result = await critiqueResumeWithLlm(parsed, engine);
+
+    expect(result.bulletFindings[0]!.issue).toBe("weak_verb");
+    expect(result.bulletFindings[0]!.suggestion).toBeUndefined();
+    expect(result.metricOverrides).toBe(0);
+  });
+
   it("returns empty bulletFindings when there are no bullets", async () => {
     const metaResponse = `{"missingSections":["summary","skills"],"summaryFeedback":null}`;
     // Only one call expected (meta pass); bullet pass skipped entirely.

@@ -27,12 +27,25 @@
  * bullet, plus a final JSON object for section and summary findings — avoiding
  * a single large JSON array that risks truncation mid-token.
  *
+ * **Reconciliation (#1094):** a small on-device model mislabels metric-
+ * bearing bullets `no_quantification` often enough that the prompt alone
+ * isn't the fix. `reconcileFindings` (below) is the second, authoritative
+ * layer: it downgrades any `no_quantification` finding the scorer's own
+ * `bulletHasMetric` disagrees with, and drops a "suggestion" that is just the
+ * bullet echoed back with a trailing period — the model's tell for "nothing
+ * to change." Both checks run against the *source* bullet text, never the
+ * model's own echoed `bullet` field — `parseBulletResponse` overwrites it
+ * with the matching `collectBullets` entry, since the model sometimes copies
+ * the prompt's `"N. "` numbering (or otherwise re-words the bullet) into that
+ * field, which would otherwise corrupt both checks.
+ *
  * Pure logic only — no React, no hooks, no imports from src/hooks or
  * src/components.
  */
 
 import type { WebLlmEngine } from "./types.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
+import { bulletHasMetric } from "../score/score.ts";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -61,6 +74,14 @@ export interface ResumeCritique {
    * found in the parsed content. Absent when there is no summary.
    */
   summaryFeedback?: string;
+  /**
+   * Count of `no_quantification` findings downgraded to `ok` because
+   * `bulletHasMetric` disagreed with the model (#1094). Optional so callers
+   * building a `ResumeCritique` outside `critiqueResumeWithLlm` (the combined
+   * analyze-resume.ts pass, which skips this reconciliation) don't need to
+   * populate it.
+   */
+  metricOverrides?: number;
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -71,7 +92,7 @@ const BULLET_SYSTEM_PROMPT = `You are a resume quality judge. For each bullet po
   "suggestion": a short improved version (omit for "ok")
 
 Rules:
-- "no_quantification": bullet lacks any number, metric, or measurable outcome
+- "no_quantification": bullet lacks any number, metric, or measurable outcome. Concrete test: does it contain a number, percentage, currency amount, duration, or a spelled-out quantity? If yes, it is NOT no_quantification.
 - "weak_verb": starts with a passive or weak verb (was, helped, assisted, worked on, etc.)
 - "vague": too generic to be meaningful even if it has a verb and a number
 - "ok": bullet is clear, starts with a strong action verb, and has a metric or concrete outcome
@@ -83,13 +104,22 @@ const META_SYSTEM_PROMPT = `You are a resume quality judge. Given the resume con
 
 Output ONLY the JSON object. No markdown, no explanation.`;
 
+/** Numbered-list prefix, e.g. "1." or "1)" — mirrors `NUMBERED_BULLET_RE` in
+ *  score.ts (private there). Without stripping this, a source bullet like
+ *  "1. Led team of 5" keeps its leading digit and `bulletHasMetric` treats the
+ *  "1" as the bullet's metric, masking a real `no_quantification` finding. */
+const NUMBERED_BULLET_RE = /^[\s ]*\d+[.)]\s+/;
+
 /** Collect all non-blank bullet texts from the parsed resume. */
 function collectBullets(parsed: HeuristicParsedResume): string[] {
   const bullets: string[] = [];
   for (const exp of parsed.experience ?? []) {
     if (!exp.description) continue;
     for (const line of exp.description.split("\n")) {
-      const t = line.replace(/^[\s•\-–*]+/, "").trim();
+      const t = line
+        .replace(/^[\s•\-–*]+/, "")
+        .replace(NUMBERED_BULLET_RE, "")
+        .trim();
       if (t.length > 0) bullets.push(t);
     }
   }
@@ -193,6 +223,12 @@ async function callEngine(
  * Parse the bullet-pass response into one finding per bullet, in order.
  * Empty/partial output is padded with `ok` so every bullet renders without
  * gaps.
+ *
+ * Findings are bound to the source `bullets[]` entry by position, not the
+ * model's own echoed `bullet` field (#1094 follow-up): the model sometimes
+ * copies the `"N. "` numbering from the prompt into that field, or otherwise
+ * re-words/truncates it, and `reconcileFindings`'s `bulletHasMetric` check and
+ * no-op-suggestion comparison both need the real source text to stay correct.
  */
 function parseBulletResponse(
   bulletRaw: string,
@@ -210,7 +246,11 @@ function parseBulletResponse(
     if (bulletIdx >= bullets.length) break;
     const obj = tryParseJson(line);
     if (obj === null) continue;
-    findings.push(coerceBulletFindingObject(obj, bullets[bulletIdx]!));
+    const sourceBullet = bullets[bulletIdx]!;
+    findings.push({
+      ...coerceBulletFindingObject(obj, sourceBullet),
+      bullet: sourceBullet,
+    });
     bulletIdx++;
   }
   // If the model returned fewer findings than bullets (truncation), pad with
@@ -219,6 +259,53 @@ function parseBulletResponse(
     findings.push({ bullet: bullets[i]!, issue: "ok" });
   }
   return findings;
+}
+
+/** Strips a trailing period and collapses whitespace for no-op-suggestion
+ *  comparison — NOT `normalizeBulletText` (group-bullets.ts), which strips a
+ *  leading marker: `finding.bullet` is the already-marker-free source text
+ *  (see `parseBulletResponse`) and the model's own `suggestion` text doesn't
+ *  carry one either. */
+function normalizeForSuggestionCompare(text: string): string {
+  return text.replace(/\s+/g, " ").trim().replace(/\.+$/, "").trim().toLowerCase();
+}
+
+/**
+ * Reconcile the model's bullet findings against the scorer's own
+ * `bulletHasMetric` definition and drop no-op suggestions (#1094).
+ *
+ * The 2B/1.5B on-device model frequently mislabels a metric-bearing bullet
+ * `no_quantification`, contradicting the heuristic Specificity dimension
+ * (`score.ts`'s `bulletHasMetric`, the repo's versioned, corpus-tested
+ * definition of "has a metric"). Any `no_quantification` finding the scorer
+ * disagrees with is downgraded to `ok` — the scorer wins, since it is
+ * deterministic and tested where the model is neither.
+ *
+ * Separately, when the model has nothing to change it often echoes the
+ * bullet back verbatim plus a trailing period as its "suggestion" — that is
+ * not a suggestion, so it's dropped regardless of the finding's issue.
+ */
+function reconcileFindings(findings: BulletFinding[]): {
+  findings: BulletFinding[];
+  metricOverrides: number;
+} {
+  let metricOverrides = 0;
+  const reconciled = findings.map((finding): BulletFinding => {
+    const downgrade =
+      finding.issue === "no_quantification" && bulletHasMetric(finding.bullet);
+    if (downgrade) metricOverrides++;
+    const issue = downgrade ? "ok" : finding.issue;
+    const noOpSuggestion =
+      finding.suggestion !== undefined &&
+      normalizeForSuggestionCompare(finding.suggestion) ===
+        normalizeForSuggestionCompare(finding.bullet);
+    const suggestion =
+      downgrade || noOpSuggestion ? undefined : finding.suggestion;
+    return suggestion === undefined
+      ? { bullet: finding.bullet, issue }
+      : { bullet: finding.bullet, issue, suggestion };
+  });
+  return { findings: reconciled, metricOverrides };
 }
 
 /** Pass 1: per-bullet critique. Returns `[]` when there are no bullets. */
@@ -313,11 +400,13 @@ export async function critiqueResumeWithLlm(
   engine: WebLlmEngine,
 ): Promise<ResumeCritique> {
   const bullets = collectBullets(parsed);
-  const bulletFindings = await runBulletPass(bullets, engine);
+  const rawBulletFindings = await runBulletPass(bullets, engine);
+  const { findings: bulletFindings, metricOverrides } =
+    reconcileFindings(rawBulletFindings);
   const { missingSections, summaryFeedback } = await runMetaPass(
     parsed,
     bullets.length,
     engine,
   );
-  return { bulletFindings, missingSections, summaryFeedback };
+  return { bulletFindings, missingSections, summaryFeedback, metricOverrides };
 }
