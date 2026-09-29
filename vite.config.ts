@@ -334,6 +334,7 @@ export default defineConfig({
       include: [
         "src/**/*.{ts,tsx}",
         "scripts/check-fixture-pii.mjs",
+        "scripts/check-eager-graph.mjs",
         "scripts/check-known-failures.mjs",
         "scripts/select-tests.mjs",
         "scripts/seo-artifacts.ts",

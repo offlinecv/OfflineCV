@@ -230,7 +230,7 @@ names what to import; the `Site` column is where it is applied.
 | `Institution · Location` | `" · "` | `MIDDOT_JOIN` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
 | `Degree, Field, Honors, GPA: <grade>` | `", "` | — (literal) | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
 | `Type · Title` (achievement) | `" · "` | `MIDDOT_JOIN` | `ats-resume-model.ts` → `buildAchievementHeader` (compose); `score/entry-dates.ts` → `joinAchievementType` / `splitAchievementType` |
-| Compact certifications line | `" · "` | `MIDDOT_JOIN` | `extract/achievements.ts` → `CREDENTIAL_LIST_SEPARATOR` (domain alias) |
+| Compact certifications line | `" · "` | `MIDDOT_JOIN` | `resume-format/separators.ts` → `CREDENTIAL_LIST_SEPARATOR` (domain alias, #1106); consumed by `ats-resume-model.ts` (compose) and `extract/achievements.ts` (split) |
 | Skills, within a category | `" · "` | `MIDDOT_JOIN` | `ats-resume-model.ts` → `buildAtsResumeModel` (skills mapping) |
 | Header ↔ trailing single-token date | `"  "` (two spaces) | `HEADER_DATE_GAP` | `ats-resume-model.ts` → `buildAtsResumeModel` |
 | Wrapped-header hanging indent | `12` pt | `HEADER_WRAP_INDENT` | `ats-resume-model.ts` ↔ `entry-blocks.ts` → `isWrappedContinuation` |

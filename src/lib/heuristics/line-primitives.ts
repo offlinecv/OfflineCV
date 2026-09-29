@@ -22,9 +22,11 @@ import {
   COUNTRY_GAZETTEER,
   DATE_RANGE_RE,
   INTL_LOCATION_RE,
+  MONTH,
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   OPEN_ENDED_ALT,
+  PROGRAM_NOTE_RE,
   SEASON,
   STRICT_MONTH_YEAR_RE,
   US_LOCATION_RE,
@@ -927,4 +929,62 @@ export function stripDateRange(text: string): string {
   cleaned = cleaned.replace(SEPARATOR_TRIM_RE, "");
   SEPARATOR_TRIM_RE.lastIndex = 0;
   return cleaned;
+}
+
+// ── Entry-header shape (moved from entry-blocks.ts, #1106) ──────────────────
+// These two predicates are pure text shape — no geometry, no segmentation — and
+// the Download-PDF exporter needs `isEntryHeaderShape` to decide how a header
+// renders. Housing them here, on the leaf every lane already reaches, keeps
+// `ats-resume-model.ts` from importing the 1,900-line segmenter for eight lines.
+
+/** True when the whole trimmed line is essentially JUST a date / date-range — a
+ *  bare year, a month-year, or a season/graduation-qualified range — so it must
+ *  not be mistaken for an entry header or an institution. Strips date tokens and
+ *  connective/season/graduation words; an empty remainder means the line carried
+ *  nothing but a date. Shared by education chunking, the entry-block segmenter
+ *  and {@link isEntryHeaderShape}. */
+export function isDateOnlyLine(text: string): boolean {
+  const stripped = text
+    .replace(new RegExp(String.raw`\b${MONTH}\.?`, "gi"), "")
+    .replace(new RegExp(String.raw`\b${SEASON}\b`, "gi"), "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/\b(?:present|current|expected|graduation|graduated|anticipated)\b/gi, "")
+    .replace(/[\s,–\-—|/().:]+/g, "")
+    .trim();
+  return stripped.length === 0;
+}
+
+/**
+ * True when `text` reads like the HEADER LEAD of a resume entry — a role title,
+ * an organization, a program/certificate name, or an institution — rather than
+ * description prose, a bare date line, or a sub-field note (GPA / Minor / etc.).
+ *
+ * This is the shared "entry-boundary shape" predicate behind the anchor-on-shape
+ * fixes: education recognizes a degree-keyword-less program entry by it (#238),
+ * and experience recognizes a dateless role header by it (#239). It is
+ * intentionally TEXT-ONLY — it makes no use of x/y geometry — so a section with
+ * no layout data (education chunking runs on flattened strings) and one with full
+ * geometry (experience) can both rely on it; each caller layers its own geometry
+ * guards (wrapped-tail indent, dangling-connective predecessor) on top.
+ *
+ * A line qualifies when ALL hold:
+ *   - it carries substantive text (non-empty after trim), and
+ *   - it LEADS WITH A CAPITAL OR DIGIT — a proper-noun / numbered entry lead, not
+ *     a lowercase-led sentence fragment (a wrapped bullet tail), and
+ *   - it does NOT read as a date-only line ({@link isDateOnlyLine}) — a bare
+ *     graduation year / attendance range is the date OF an entry, not a new one, and
+ *   - it does NOT read as prose ({@link isProseLine}) — a mid-thought description
+ *     sentence, and
+ *   - it is NOT a sub-field note ({@link PROGRAM_NOTE_RE}) — "GPA: 3.8",
+ *     "Minor in Economics", "Relevant Coursework: …" are properties of the entry
+ *     above, not a new entry head.
+ */
+export function isEntryHeaderShape(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (!/^[A-Z0-9]/.test(t)) return false;
+  if (isDateOnlyLine(t)) return false;
+  if (isProseLine(t)) return false;
+  if (PROGRAM_NOTE_RE.test(t)) return false;
+  return true;
 }

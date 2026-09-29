@@ -37,8 +37,8 @@ import {
   SEASON,
   OPEN_ENDED,
 } from "./regex.ts";
-import { isEntryHeaderShape, mergeWrappedContinuations } from "./entry-blocks.ts";
-import { isBulletLine } from "./line-primitives.ts";
+import { mergeWrappedContinuations } from "./entry-blocks.ts";
+import { isBulletLine, isEntryHeaderShape } from "./line-primitives.ts";
 import {
   LINE_Y_EPS,
   computeBodyFontSize,

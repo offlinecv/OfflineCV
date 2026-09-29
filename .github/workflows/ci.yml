@@ -48,6 +48,14 @@ jobs:
       # text + metadata via pdfjs-dist (already a dependency), so no poppler-utils
       # or any other system binary is needed on the runner.
       - run: npm run check:fixtures
+      # Eager-graph gate (#1106): no HTML entry may statically reach an on-demand
+      # parser module (`line-assembly.ts`, `entry-blocks.ts`, the segmenting
+      # extractors…). A single `import { x } from` can undo the lazy-tier
+      # discipline `cascade.ts` documents without anything failing, so this is a
+      # source walk that fails naming the chain. Mirrored here rather than left inside
+      # `npm run verify`, for the same reason as `check:core` below: branch
+      # protection requires THIS job.
+      - run: npm run check:eager
       # Issue-linked baseline gate (#654). The corpus ratchets can see that an
       # exemption still fails; only GitHub knows whether the issue it is charged
       # to is still open, so this is the one check that needs a token — hence a

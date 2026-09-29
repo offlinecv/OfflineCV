@@ -72,3 +72,27 @@ export const HEADER_DATE_GAP = "  ";
  *  but unlike it the coupling is a NUMBER the parser compares against, so the
  *  two ends genuinely share one value. */
 export const HEADER_WRAP_INDENT = 12;
+
+/**
+ * The separator that joins several credentials onto ONE compact certifications
+ * line (#899) — the credentials-domain name for {@link MIDDOT_JOIN}. It is
+ * deliberately the same `" · "` every other multi-value line in the
+ * reconstructed PDF uses; the exporter (`ats-resume-model.ts` builds
+ * `AtsSection.compactLine` with it and the renderer wraps that line on it
+ * ATOMICALLY) and the re-parser (`extract/achievements.ts`, `parseFlatAwardList`)
+ * both import THIS name, so neither spells the glue a second time (#1106 moved
+ * it here from the extractor so the exporter no longer reaches into the parser
+ * for it).
+ *
+ * Atomic wrapping is what makes the compact line round-trip at all: the wrap
+ * point can only fall BETWEEN credentials, so every extracted `PdfLine` of the
+ * block starts at a credential boundary and the re-parser can split each line
+ * back into whole credentials without any flow-joining. The parse → export →
+ * re-parse hop over `google-docs-skia-proxy-certifications.pdf`
+ * (`corpus-roundtrip.test.ts`) is what pins the two ends to the same glyph.
+ */
+export const CREDENTIAL_LIST_SEPARATOR = MIDDOT_JOIN;
+
+/** The boundary {@link CREDENTIAL_LIST_SEPARATOR} draws, as the re-parser sees
+ *  it — {@link MIDDOT_SPLIT_RE} under its credentials-domain name. */
+export const CREDENTIAL_SPLIT_RE = MIDDOT_SPLIT_RE;

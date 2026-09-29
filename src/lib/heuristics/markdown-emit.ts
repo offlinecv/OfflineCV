@@ -21,20 +21,22 @@
  * parser's lines and returns, alongside the markdown, the exact line objects
  * it promoted; `splitIntoSectionsWithMarkdown` opens sections by identity.
  *
- * `parseHeuristic` (`openresume.ts`) is the production caller; it attaches the
+ * `parseHeuristic` (`openresume.ts`) is the sole caller; it attaches the
  * markdown to `HeuristicResult.markdown`, which the cascade carries onto
  * `CascadeResult.markdown` for the on-device LLM prompts and the header
- * oracle. `emitMarkdown` remains as a convenience over raw items for callers
- * outside the cascade.
+ * oracle. There is deliberately no raw-items convenience wrapper and no
+ * re-export from the heuristics barrel (#1106): the barrel is eagerly imported
+ * by both HTML entries via `resume-library.ts`, and a wrapper that assembled
+ * lines would drag `line-assembly.ts` onto the entry chunk for a caller that
+ * does not exist.
  *
  * Split into small utility functions so each concern can be unit-tested
  * independently: body-font detection, bullet detection, per-line rendering,
  * paragraph separation.
  */
 
-import type { PdfTextItem, PdfPageInfo } from "./types.ts";
 import type { PdfLine } from "./line-model.ts";
-import { computeBodyFontSize, groupIntoLines } from "./line-assembly.ts";
+import { computeBodyFontSize } from "./line-assembly.ts";
 
 // ── Thresholds (tuneable) ───────────────────────────────────────────────────
 
@@ -135,7 +137,7 @@ export function needsParagraphBreak(
   return false;
 }
 
-// ── Entry points ────────────────────────────────────────────────────────────
+// ── Entry point ────────────────────────────────────────────────────────────
 
 /**
  * Emit structure-preserving markdown from the parser's assembled lines.
@@ -171,20 +173,4 @@ export function emitMarkdownFromLines(
   // blank lines adds nothing.
   const markdown = output.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return { markdown, headings };
-}
-
-/**
- * Convenience over raw positioned items: assemble lines with the shared
- * assembler, then emit. For callers outside the cascade that hold their own
- * `PdfTextItem[]`; inside the cascade, `parseHeuristic` calls
- * `emitMarkdownFromLines` on the lines it already built so the splitter and
- * the emitter share objects.
- */
-export function emitMarkdown(
-  items: PdfTextItem[],
-  pages: PdfPageInfo[],
-  boundaries?: Map<number, number>,
-): string | undefined {
-  if (items.length === 0 || pages.length === 0) return undefined;
-  return emitMarkdownFromLines(groupIntoLines(items, boundaries))?.markdown;
 }

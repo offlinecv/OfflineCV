@@ -7,7 +7,10 @@ import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { YEAR_RE } from "../regex.ts";
 import { splitAchievementType } from "../../score/entry-dates.ts";
-import { MIDDOT_JOIN, MIDDOT_SPLIT_RE } from "../../resume-format/index.ts";
+import {
+  CREDENTIAL_LIST_SEPARATOR,
+  CREDENTIAL_SPLIT_RE,
+} from "../../resume-format/index.ts";
 import {
   dateSeparator,
   isBulletLine,
@@ -24,32 +27,10 @@ import { liftHeaderLabel } from "./projects.ts";
 // `line-primitives.ts` (#283) so the achievements path and the entry-block
 // parser share one copy — see that module for the regex rationale.
 
-/**
- * The separator that joins several credentials onto ONE compact certifications
- * line (#899). It is deliberately the same `" · "` every other multi-value line
- * in the reconstructed PDF uses (the skills list, `Company · Location`) — since
- * #649 that is enforced rather than asserted: the bytes are `MIDDOT_JOIN` from
- * `lib/resume-format`, and this name is the credentials-domain alias. The
- * exporter imports THIS constant rather than spelling it a second time —
- * `ats-resume-model.ts` builds `AtsSection.compactLine` with it and the renderer
- * wraps that line on it ATOMICALLY (`MIDDOT_SEGMENT_SEP`, `wrapSegmentsToLines`).
- *
- * Atomic wrapping is what makes the compact line round-trip at all: the wrap
- * point can only fall BETWEEN credentials, so every extracted `PdfLine` of the
- * block starts at a credential boundary and {@link parseFlatAwardList} can split
- * each line back into whole credentials without any flow-joining. The
- * parse → export → re-parse hop over `google-docs-skia-proxy-certifications.pdf`
- * (`corpus-roundtrip.test.ts`) is what pins the two ends to the same glyph.
- */
-export const CREDENTIAL_LIST_SEPARATOR = MIDDOT_JOIN;
-
-/**
- * The boundary {@link CREDENTIAL_LIST_SEPARATOR} draws, as the re-parser sees
- * it. Whitespace is REQUIRED on both sides, so a middot glued inside a token is
- * not a boundary, and `\s` (which covers the NBSP / thin spaces a PDF extractor
- * emits, not just U+0020) absorbs whatever spacing the extraction hands back.
- */
-export const CREDENTIAL_SPLIT_RE = MIDDOT_SPLIT_RE;
+// `CREDENTIAL_LIST_SEPARATOR` / `CREDENTIAL_SPLIT_RE` — the compact
+// certifications-line glue (#899) — live in `lib/resume-format/separators.ts`
+// since #1106, imported above, so the exporter reads them from the contract
+// module instead of from this extractor.
 
 /**
  * Extract an Achievements / Accomplishments / Awards / Activities section into

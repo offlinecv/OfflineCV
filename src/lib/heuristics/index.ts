@@ -34,9 +34,6 @@ export {
 } from "./thresholds.ts";
 export type { CascadeBranch, CascadeThresholds } from "./thresholds.ts";
 export { CASCADE_VERSION } from "./types.ts";
-// Markdown emitter. Exported so callers can reuse it against locally
-// extracted `PdfTextItem[]` without re-running the cascade.
-export { emitMarkdown } from "./markdown-emit.ts";
 export type {
   CascadeResult,
   HeuristicResult,
