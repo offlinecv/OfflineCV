@@ -63,12 +63,12 @@ const ORIGIN_READ = /\.origin\b/;
  * false positives {@link FALSE_POSITIVE_HINT} predicted, stripped out before
  * the scan rather than excused file by file.
  *
- * They arrived with the résumé-profile sender (#620): `lib/extension-profile.ts`
- * has to name the page's own origin as a `postMessage` target and compare an
- * incoming `event.origin` against it, and both of those are the thing the
- * extension's bridge REQUIRES — a sender that dodged them to keep this gate
- * quiet would be the actual defect. Narrowing here is what the hint asks for
- * and is strictly safer than the alternative it warns against: adding that file
+ * They arrived with the résumé-profile sender (#620), which had to name the
+ * page's own origin as a `postMessage` target and compare an incoming
+ * `event.origin` against it, and both of those were the thing the extension's
+ * bridge REQUIRED — a sender that dodged them to keep this gate quiet would
+ * have been the actual defect. Narrowing here is what the hint asks for and
+ * is strictly safer than the alternative it warns against: adding that file
  * to {@link ALLOWED} would exempt it from a genuine `job.origin` read too.
  *
  * Deliberately a closed list of receivers rather than a general "any origin
