@@ -2,10 +2,14 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * Unit tests for diffParses (issue #242).
+ * Unit tests for diffParses (issue #242, grounding gate #1093).
  *
- * Pure function — no engine, no DOM. Covers every disagreement kind and its
- * edge cases:
+ * Pure function — no engine, no DOM, EXCEPT the grounding-gate describe block
+ * at the bottom, which reads the real `latex/multi-degree-coursework.pdf`
+ * fixture (the #1093 repro) through `runCascade` the way `corpus.test.ts`
+ * does, so the n-gram threshold and the project/role split are pinned against
+ * real extracted text rather than a hand-tuned string. Covers every
+ * disagreement kind and its edge cases:
  *   - missing_field: each scalar (full_name/email/phone/location/summary),
  *     null/undefined/blank on the heuristic side, reverse direction ignored
  *   - dropped_section: experience / education / skills whole-section drop
@@ -14,9 +18,12 @@
  *   - likelyCause correlation + kind-aware trigger priority
  *   - no-disagreement cases (equal/heuristic-richer)
  *   - ordering + the partial-education non-report rationale
+ *   - grounding gate (#1093): an LLM-recovered scalar/role that never
+ *     demonstrably occurs in the text the model read is rejected, not shown
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   diffParses as canonicalDiffParses,
   type ParseDisagreement,
@@ -28,6 +35,7 @@ import { toCanonicalResume } from "./canonical.ts";
 import { projectLlmDiff } from "./projections.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
 import type { SectionedResume } from "./sections.ts";
+import { runCascade } from "./cascade.ts";
 
 // All gateable sections present by default — most cases below exercise drop
 // *detection*, not the section-presence guard (that has its own describe block).
@@ -37,6 +45,25 @@ const ALL_SECTIONS: ReadonlySet<SectionName> = new Set([
   "education",
   "skills",
 ]);
+
+// A grounding text broad enough to cover every LLM-recovered value the cases
+// below use, so tests about OTHER logic (ordering, cause correlation, the
+// section-presence guard…) aren't incidentally exercising the grounding gate
+// too. The grounding-gate describe block at the bottom passes its own,
+// deliberately narrow, text.
+const DEFAULT_GROUNDING_TEXT = [
+  "Jane Example",
+  "jane@example.com",
+  "a@example.com",
+  "(312) 555-0123",
+  "Chicago, IL",
+  "NYC",
+  "Engineer.",
+  "Co 0",
+  "Co 1",
+  "Co 2",
+  "Co 3",
+].join(" ");
 
 // Post-#445 `diffParses` takes two `CanonicalResume` shapes and derives the
 // section-presence guard from the HEURISTIC canonical's `sections.byName` keys.
@@ -59,13 +86,19 @@ function rawDiffParses(
   llm: LlmParsedResume,
   triggers: LayoutTrigger[],
   presentSections: ReadonlySet<SectionName>,
+  groundingText: string = DEFAULT_GROUNDING_TEXT,
 ): ParseDisagreement[] {
   const heuristicCanonical = toCanonicalResume(
     heuristic,
     sectionsWithHeaders(presentSections),
     {},
   );
-  return canonicalDiffParses(heuristicCanonical, projectLlmDiff(llm), triggers);
+  return canonicalDiffParses(
+    heuristicCanonical,
+    projectLlmDiff(llm),
+    triggers,
+    groundingText,
+  ).disagreements;
 }
 
 function diffParses(
@@ -73,8 +106,9 @@ function diffParses(
   llm: LlmParsedResume,
   triggers: LayoutTrigger[],
   presentSections: ReadonlySet<SectionName> = ALL_SECTIONS,
+  groundingText: string = DEFAULT_GROUNDING_TEXT,
 ): ParseDisagreement[] {
-  return rawDiffParses(heuristic, llm, triggers, presentSections);
+  return rawDiffParses(heuristic, llm, triggers, presentSections, groundingText);
 }
 
 // ── Builders ─────────────────────────────────────────────────────────────────
@@ -408,5 +442,286 @@ describe("diffParses — no disagreement & ordering", () => {
     const l = llm({ experience: exp(3), email: "a@example.com" });
     const triggers: LayoutTrigger[] = ["two_column"];
     expect(diffParses(h, l, triggers)).toEqual(diffParses(h, l, triggers));
+  });
+});
+
+// ── Grounding gate: scalars (#1093) ─────────────────────────────────────────
+
+describe("diffParses — grounding gate: scalars", () => {
+  it("rejects an LLM scalar that never occurs in the grounding text", () => {
+    const r = diffParses(
+      heuristic({ email: undefined }),
+      llm({ email: "ghost@example.com" }),
+      [],
+      ALL_SECTIONS,
+      "Jane Example works at Acme Corp.",
+    );
+    expect(findKind(r, "email")).toBeUndefined();
+  });
+
+  it("accepts an LLM scalar that occurs verbatim in the grounding text", () => {
+    const r = diffParses(
+      heuristic({ email: undefined }),
+      llm({ email: "jane@example.com" }),
+      [],
+      ALL_SECTIONS,
+      "Contact: jane@example.com",
+    );
+    expect(findKind(r, "email")?.kind).toBe("missing_field");
+  });
+
+  it("ignores punctuation/case/whitespace differences when grounding", () => {
+    const r = diffParses(
+      heuristic({ phone: undefined }),
+      llm({ phone: "(312) 555-0123" }),
+      [],
+      ALL_SECTIONS,
+      "  PHONE:   (312) 555-0123 . ",
+    );
+    expect(findKind(r, "phone")?.kind).toBe("missing_field");
+  });
+
+  it("counts a rejected scalar toward rejectedUngrounded, without reporting it", () => {
+    const heuristicCanonical = toCanonicalResume(
+      heuristic({ email: undefined }),
+      sectionsWithHeaders(ALL_SECTIONS),
+      {},
+    );
+    const result = canonicalDiffParses(
+      heuristicCanonical,
+      projectLlmDiff(llm({ email: "ghost@example.com" })),
+      [],
+      "nothing relevant here",
+    );
+    expect(result.disagreements).toEqual([]);
+    expect(result.rejectedUngrounded).toBe(1);
+  });
+});
+
+// ── Grounding gate: summary n-gram threshold (#1093) ────────────────────────
+//
+// Pinned against the real `latex/multi-degree-coursework.pdf` fixture — the
+// exact PDF #1093 was filed against — rather than a hand-written string, so a
+// change to the threshold or the tokenizer is checked against real extracted
+// markdown, not a string shaped to make the test pass.
+
+describe("diffParses — grounding gate: summary n-gram threshold", () => {
+  // Quoted verbatim from #1093: the shipped model's fabricated "recovered"
+  // summary for this fixture, which states nowhere in the PDF.
+  const FABRICATED_SUMMARY =
+    "Software engineering intern with experience in machine learning, data structures, and cloud computing. Strong analytical skills and a passion for developing innovative solutions.";
+
+  it("rejects the fabricated #1093 summary against the real fixture text", async () => {
+    const bytes = readFileSync(
+      "tests/fixtures/pdfs/latex/multi-degree-coursework.pdf",
+    );
+    const result = await runCascade(new Uint8Array(bytes));
+    const groundingText = result.markdown ?? result.rawText;
+
+    const r = diffParses(
+      heuristic({ summary: undefined }),
+      llm({ summary: FABRICATED_SUMMARY }),
+      [],
+      ALL_SECTIONS,
+      groundingText,
+    );
+    expect(findKind(r, "summary")).toBeUndefined();
+  });
+
+  it("accepts a real summary drawn from a fixture that has one", async () => {
+    const bytes = readFileSync(
+      "tests/fixtures/pdfs/google-docs/google-docs-skia-proxy-classic.pdf",
+    );
+    const result = await runCascade(new Uint8Array(bytes));
+    const groundingText = result.markdown ?? result.rawText;
+    const realSummary = result.canonical.fields.summary;
+    expect(realSummary).toBeTruthy();
+
+    const r = diffParses(
+      heuristic({ summary: undefined }),
+      llm({ summary: realSummary! }),
+      [],
+      ALL_SECTIONS,
+      groundingText,
+    );
+    expect(findKind(r, "summary")?.kind).toBe("missing_field");
+    expect(findKind(r, "summary")?.llmValue).toBe(realSummary);
+  });
+});
+
+// ── Grounding gate: location vs work authorization (#1093, #792, #837) ─────
+
+describe("diffParses — grounding gate: location vs work authorization", () => {
+  it("rejects a work-authorization statement recovered as a location", () => {
+    // The real #1093 contact line: "973-555-0123 | jordan.bennett@example.com
+    // | LinkedIn | GitHub | US Citizen" — a right-to-work statement, not a
+    // locality (#792, #837).
+    const r = diffParses(
+      heuristic({ location: undefined }),
+      llm({ location: "US Citizen" }),
+      [],
+      ALL_SECTIONS,
+      "973-555-0123 | jordan.bennett@example.com | LinkedIn | GitHub | US Citizen",
+    );
+    expect(findKind(r, "location")).toBeUndefined();
+  });
+
+  it("accepts a real locality grounded in the text", () => {
+    const r = diffParses(
+      heuristic({ location: undefined }),
+      llm({ location: "Bellevue, WA" }),
+      [],
+      ALL_SECTIONS,
+      "Northwind Labs Bellevue, WA",
+    );
+    expect(findKind(r, "location")?.kind).toBe("missing_field");
+    expect(findKind(r, "location")?.llmValue).toBe("Bellevue, WA");
+  });
+
+  it("rejects a work-authorization clause packed alongside other location prose", () => {
+    // matchWorkAuthorization's patterns are anchored (^...$) and only ever see
+    // one delimiter-split segment — a value like "US Citizen, open to
+    // relocation" must be split before matching, or the isolated-phrase-only
+    // check silently lets the statement through as a "missing location".
+    const r = diffParses(
+      heuristic({ location: undefined }),
+      llm({ location: "US Citizen, open to relocation" }),
+      [],
+      ALL_SECTIONS,
+      "973-555-0123 | jordan.bennett@example.com | US Citizen, open to relocation",
+    );
+    expect(findKind(r, "location")).toBeUndefined();
+  });
+});
+
+// ── Grounding gate: roles vs projects (#1093) ───────────────────────────────
+
+describe("diffParses — grounding gate: roles excluded by project name or ungrounded company", () => {
+  it("does not count an LLM role whose company matches a heuristic project name", () => {
+    const r = diffParses(
+      heuristic({
+        experience: [{ title: "Engineer", company: "Acme Corp" }],
+        projects: [{ name: "tinylm | Link" }],
+      }),
+      llm({
+        experience: [
+          { company: "Acme Corp", title: "Engineer", description: "" },
+          { company: "tinylm", title: "Project", description: "" },
+        ],
+      }),
+      [],
+      ALL_SECTIONS,
+      "Acme Corp Engineer. tinylm | Link is a personal project.",
+    );
+    expect(findKind(r, "experience")).toBeUndefined();
+  });
+
+  it("does not count an LLM role whose company never occurs in the grounding text", () => {
+    const r = diffParses(
+      heuristic({ experience: [{ title: "Engineer", company: "Acme Corp" }] }),
+      llm({
+        experience: [
+          { company: "Acme Corp", title: "Engineer", description: "" },
+          { company: "Ghost Inc", title: "Engineer", description: "" },
+        ],
+      }),
+      [],
+      ALL_SECTIONS,
+      "Acme Corp Engineer.",
+    );
+    expect(findKind(r, "experience")).toBeUndefined();
+  });
+
+  it("still reports dropped_role for grounded, non-project roles", () => {
+    const r = diffParses(
+      heuristic({
+        experience: [{ title: "Engineer", company: "Acme Corp" }],
+        projects: [{ name: "tinylm | Link" }],
+      }),
+      llm({
+        experience: [
+          { company: "Acme Corp", title: "Engineer", description: "" },
+          { company: "Globex", title: "Engineer", description: "" },
+          { company: "tinylm", title: "Project", description: "" },
+        ],
+      }),
+      [],
+      ALL_SECTIONS,
+      "Acme Corp Engineer. Globex Engineer. tinylm | Link is a personal project.",
+    );
+    const d = findKind(r, "experience");
+    expect(d!.kind).toBe("dropped_role");
+    expect(d!.heuristicValue).toBe("1");
+    expect(d!.llmValue).toBe("2");
+  });
+
+  it("does not let a degenerate project name (normalizes to empty) swallow every role", () => {
+    // A project header line like "." survives `extractProjects` (it only
+    // drops names equal to "" before normalization); `normalizeForGrounding(".")`
+    // strips the trailing punctuation to "". Every company's normalized form
+    // vacuously `.includes("")`, so an unfiltered empty entry would flag every
+    // grounded role as "a project" and hide a real dropped_role gap.
+    const r = diffParses(
+      heuristic({
+        experience: [{ title: "Engineer", company: "Acme Corp" }],
+        projects: [{ name: "." }],
+      }),
+      llm({
+        experience: [
+          { company: "Acme Corp", title: "Engineer", description: "" },
+          { company: "Globex", title: "Engineer", description: "" },
+        ],
+      }),
+      [],
+      ALL_SECTIONS,
+      "Acme Corp Engineer. Globex Engineer.",
+    );
+    const d = findKind(r, "experience");
+    expect(d!.kind).toBe("dropped_role");
+    expect(d!.heuristicValue).toBe("1");
+    expect(d!.llmValue).toBe("2");
+  });
+
+  it("reproduces the #1093 shape end-to-end against the real fixture", async () => {
+    const bytes = readFileSync(
+      "tests/fixtures/pdfs/latex/multi-degree-coursework.pdf",
+    );
+    const result = await runCascade(new Uint8Array(bytes));
+    const groundingText = result.markdown ?? result.rawText;
+
+    // Mirrors #1093: the shipped model reported the 4 real roles, the 3
+    // projects (tinylm, bytetoken, Finance4Dummies) as more "roles", plus one
+    // entry grounded nowhere at all.
+    const llmParse: LlmParsedResume = {
+      full_name: null,
+      email: null,
+      phone: null,
+      location: "US Citizen",
+      summary:
+        "Software engineering intern with experience in machine learning, data structures, and cloud computing. Strong analytical skills and a passion for developing innovative solutions.",
+      skills: [],
+      experience: [
+        { company: "Northwind Labs", title: "Software Engineering Intern on the Machine Learning Team", description: "" },
+        { company: "Beacon Financial", title: "Software Engineering Intern", description: "" },
+        { company: "Greenfield Studios", title: "Software Engineering Intern", description: "" },
+        { company: "Meridian Analytics", title: "Software Engineering Intern", description: "" },
+        { company: "tinylm", title: "Project", description: "" },
+        { company: "bytetoken", title: "Project", description: "" },
+        { company: "Finance4Dummies", title: "Project", description: "" },
+        { company: "Ghost Corp", title: "Extra", description: "" },
+      ],
+      education: [],
+    };
+
+    const result2 = canonicalDiffParses(
+      result.canonical,
+      projectLlmDiff(llmParse),
+      result.triggers,
+      groundingText,
+    );
+    expect(result2.disagreements.find((d) => d.field === "summary")).toBeUndefined();
+    expect(result2.disagreements.find((d) => d.field === "location")).toBeUndefined();
+    expect(result2.disagreements.find((d) => d.field === "experience")).toBeUndefined();
+    expect(result2.rejectedUngrounded).toBeGreaterThan(0);
   });
 });
