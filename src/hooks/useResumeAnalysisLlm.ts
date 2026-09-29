@@ -271,6 +271,7 @@ export function useResumeAnalysisLlm(
           bulletCount: critique.bulletFindings.length,
           flaggedCount,
           missingSectionCount: critique.missingSections.length,
+          metricOverrides: critique.metricOverrides ?? 0,
         });
 
         setStatus({
