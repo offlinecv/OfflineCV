@@ -92,19 +92,6 @@ export async function runCascade(
     extract.extractionFailureReason,
   );
 
-  // Markdown emission. Skip on scanned PDFs — no positional signal to emit
-  // structure from. Emitter may also return undefined when the document is
-  // too sparse; downstream falls back to rawText.
-  let markdown: string | undefined;
-  if (!layout.isScanned) {
-    const { emitMarkdown } = await import("./markdown-emit.ts");
-    markdown = emitMarkdown(
-      extract.items,
-      extract.pages,
-      extract.columnBoundaries,
-    );
-  }
-
   const t0Duration = Date.now() - t0Start;
 
   // Escalation reason for the upcoming tier — surfaces in the tier_engaged
@@ -142,12 +129,17 @@ export async function runCascade(
 
   const t1Start = Date.now();
   const { parseHeuristic } = await import("./openresume.ts");
+  // Markdown emission rides inside Tier 1 (#651): the emitter renders the
+  // same `PdfLine[]` the section splitter consumes, so a promoted heading is
+  // by identity a line the splitter can open a section at. Scanned PDFs never
+  // reach here; the emitter may still return nothing on a too-sparse document,
+  // in which case `markdown` is absent and downstream falls back to rawText.
   const heuristic = parseHeuristic(
     extract.items,
     extract.pages,
-    markdown,
     extract.linkAnnotations,
     extract.columnBoundaries,
+    { emitMarkdown: true },
   );
   const t1Duration = Date.now() - t1Start;
 
@@ -201,7 +193,7 @@ export async function runCascade(
     suggestedEscalation,
     tiers,
     rawText: extract.text,
-    markdown,
+    markdown: heuristic.markdown,
     linkAnnotations: extract.linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,

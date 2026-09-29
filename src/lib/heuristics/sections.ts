@@ -39,7 +39,11 @@ import {
 } from "./regex.ts";
 import { isEntryHeaderShape, mergeWrappedContinuations } from "./entry-blocks.ts";
 import { isBulletLine } from "./line-primitives.ts";
-import { LINE_Y_EPS, mergeItemText } from "./line-assembly.ts";
+import {
+  LINE_Y_EPS,
+  computeBodyFontSize,
+  mergeItemText,
+} from "./line-assembly.ts";
 import type { PdfLine, PdfSection, SectionedResume } from "./line-model.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./line-model.ts";
 
@@ -148,32 +152,6 @@ const TERMINAL_PUNCT_RE = /[.!?]$/;
 const VISUAL_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
 
 /**
- * Character-weighted mode of `maxFontSize` across lines — the document body
- * baseline used by the visual-header test. Mirrors
- * `markdown-emit.ts::computeBodyFontSize`, but reads `PdfLine.maxFontSize`
- * (this module's line shape) rather than that module's `PdfLine.fontSize`;
- * weighting by character count keeps multi-line headers from dominating the
- * mode, so the long body paragraphs win. Returns 10pt for an empty document.
- */
-function computeBodyBaseline(lines: PdfLine[]): number {
-  if (lines.length === 0) return 10;
-  const bins = new Map<number, number>();
-  for (const line of lines) {
-    const bin = Math.round(line.maxFontSize * 10) / 10;
-    bins.set(bin, (bins.get(bin) ?? 0) + line.text.trim().length);
-  }
-  let mode = 10;
-  let maxChars = 0;
-  for (const [size, chars] of bins.entries()) {
-    if (chars > maxChars) {
-      maxChars = chars;
-      mode = size;
-    }
-  }
-  return mode;
-}
-
-/**
  * Ratio of a line's gap-above to the document body line-height at which the gap
  * reads as a *paragraph break* (a section boundary cue), not ordinary
  * within-paragraph leading (#216). Calibrated against the two font-flattening
@@ -190,7 +168,7 @@ const HEADER_GAP_RATIO = 1.4;
  * Character-weighted mode of the positive `gapAbove` values across lines — the
  * document's typical within-paragraph line-height, the baseline the
  * vertical-gap header cue (#216) measures against. Mirrors the weighting in
- * `computeBodyBaseline` (weight each gap bin by the line's character count) so
+ * `computeBodyFontSize` (weight each gap bin by the line's character count) so
  * long body paragraphs dominate the mode and a handful of wider header gaps
  * never become the baseline. Gaps are binned to 0.5pt. Returns a 14pt default
  * for a document with no measurable gaps (≤1 line, or all first-on-page).
@@ -582,7 +560,7 @@ export function splitIntoSections(
   }
 
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
-  const bodyBaseline = computeBodyBaseline(lines);
+  const bodyBaseline = computeBodyFontSize(lines);
   const bodyLineHeight = computeBodyLineHeight(lines);
   // True until the first non-profile section (keyword or visual) opens.
   let openedRealSection = false;
@@ -1852,33 +1830,6 @@ export function findSection(
 // ── Markdown-anchored section splitting ──────────────────────────
 
 /**
- * ATX heading at the start of a line — captures the heading payload. The
- * PDF markdown emitter (`markdown-emit.ts`) promotes lines to `#`/`##`/`###`
- * based on font-size ratio, so every heading we match here corresponds to
- * a line that cleared the promotion gate in the original PDF.
- */
-const MARKDOWN_HEADING_RE = /^\s*#{1,3}\s+(.+?)\s*#*\s*$/;
-
-/**
- * Split `lines` into sections using the markdown's heading structure as the
- * boundary signal, rather than running `matchSectionHeader` against every
- * line. Returns `null` when the markdown yielded fewer than two canonical
- * sections — the caller falls back to the regex-on-line splitter.
- *
- * Why this is tighter than the regex-on-line splitter: the line splitter
- * matches *any* line whose text equals a section keyword (e.g. a line that
- * just says "Skills" in the middle of a profile paragraph would open a new
- * section). The markdown splitter only treats a line as a header when the
- * PDF markdown emitter already promoted it via font-size ratio — filtering
- * out the body-font-size false positives the line splitter cannot avoid.
- *
- * Matching is done by normalized text equality between the markdown heading
- * payload and the PDF line text. Both sides are trimmed and lowercased and
- * have trailing `:` / `·` / `•` stripped (mirroring `matchSectionHeader`).
- * Lines without a corresponding markdown-heading match fall into the
- * current section.
- */
-/**
  * Header-shape gate for a two-line-wrap fold half (#374).
  *
  * A wrapped-header fragment is short, header-cased, and unpunctuated — the same
@@ -1930,12 +1881,36 @@ function matchWrappedHeader(prev: PdfLine, cur: PdfLine): SectionName | null {
   return matchSectionHeader(joined);
 }
 
+/**
+ * Split `lines` into sections using the markdown emitter's heading promotions
+ * as the boundary signal, rather than running `matchSectionHeader` against
+ * every line. `headings` is the set of `PdfLine` objects the emitter rendered
+ * as `#`/`##`/`###` (`MarkdownEmission.headings`) — the SAME objects as in
+ * `lines`, so membership is tested by identity. Returns `null` when fewer than
+ * two canonical sections open; the caller falls back to the regex-on-line
+ * splitter.
+ *
+ * Why this is tighter than the regex-on-line splitter: the line splitter
+ * matches *any* line whose text equals a section keyword (e.g. a line that
+ * just says "Skills" in the middle of a profile paragraph would open a new
+ * section). This splitter only treats a line as a header when the emitter
+ * already promoted it via font-size ratio — filtering out the body-font-size
+ * false positives the line splitter cannot avoid.
+ *
+ * Why identity and not text (#651): the emitter used to assemble its own lines
+ * and this splitter reconciled the two by normalized text equality, so any
+ * assembly disagreement on a heading row silently failed the match and demoted
+ * the whole document to the regex path. With one assembler and one array, the
+ * promotion gate is meaningful exactly because the promoted object IS the line
+ * being classified. A promoted heading whose text is not a canonical section
+ * name (the candidate's name, a tagline) opens nothing and falls into the
+ * current section, as before.
+ */
 export function splitIntoSectionsWithMarkdown(
   lines: PdfLine[],
-  markdown: string,
+  headings: ReadonlySet<PdfLine>,
 ): PdfSection[] | null {
-  const headerTexts = extractCanonicalHeadingTexts(markdown);
-  if (headerTexts.size === 0) return null;
+  if (headings.size === 0) return null;
 
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
   // Immediately-preceding line that was APPENDED to the current section (not a
@@ -1943,9 +1918,8 @@ export function splitIntoSectionsWithMarkdown(
   // below only ever considers two consecutive body lines. See `matchWrappedHeader`.
   let prevAppended: PdfLine | null = null;
   for (const line of lines) {
-    const key = normalizeHeaderText(line.text);
-    const section = headerTexts.get(key);
-    if (section && matchSectionHeader(line.text) === section) {
+    const section = headings.has(line) ? matchSectionHeader(line.text) : null;
+    if (section) {
       sections.push({
         name: section,
         rawHeading: line.text.trim(),
@@ -1957,8 +1931,8 @@ export function splitIntoSectionsWithMarkdown(
     // #374 two-line-wrapped-header recovery. A header that wraps across two
     // visual lines ("Technical" / "Skills") is emitted by the markdown emitter
     // as two body lines glued into the flattened content grid, so NEITHER half
-    // reaches `headerTexts` as a promoted heading — the map-gated branch above
-    // never fires and the whole section is stranded in the profile. When this
+    // is in `headings` — the identity-gated branch above never fires and the
+    // whole section is stranded in the profile. When this
     // line plus the line immediately appended before it reconstruct an EXACT
     // known multi-word section alias, treat the pair as one header: drop the
     // first half from the current section and open the reconstructed one. The
@@ -1984,49 +1958,10 @@ export function splitIntoSectionsWithMarkdown(
     prevAppended = line;
   }
 
-  // Count only non-profile sections — a markdown with zero canonical
-  // headings that somehow survived the empty-map check still falls back.
+  // Count only non-profile sections — promoted headings that are all
+  // non-canonical (name, tagline) open nothing and still fall back.
   const canonicalCount = sections.filter((s) => s.name !== "profile").length;
   if (canonicalCount < 2) return null;
 
   return sections;
-}
-
-/**
- * Scan a markdown document for `#`/`##`/`###` headings whose payload matches
- * a canonical section keyword. Returns a `normalizedText → SectionName` map
- * so the splitter can look up each PDF line by its own normalized text.
- *
- * Duplicates (same heading text appearing twice, e.g. two "EDUCATION"
- * headings) collapse to a single entry; the splitter opens a new section
- * each time it sees the normalized text on a PDF line, so both PDF-side
- * occurrences still produce section breaks.
- */
-function extractCanonicalHeadingTexts(
-  markdown: string,
-): Map<string, SectionName> {
-  const out = new Map<string, SectionName>();
-  const rawLines = markdown.split(/\r?\n/);
-  for (const raw of rawLines) {
-    const m = MARKDOWN_HEADING_RE.exec(raw);
-    if (!m) continue;
-    const payload = m[1];
-    const section = matchSectionHeader(payload);
-    if (!section) continue;
-    out.set(normalizeHeaderText(payload), section);
-  }
-  return out;
-}
-
-/**
- * Normalize a candidate heading text for equality comparison. Mirrors the
- * pre-matching normalization in `matchSectionHeader` (trim, lowercase,
- * strip trailing `:` / `·` / `•`) so both sides collide when equivalent.
- */
-function normalizeHeaderText(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[:·•]+$/, "")
-    .trim();
 }

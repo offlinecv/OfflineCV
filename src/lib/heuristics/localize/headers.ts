@@ -21,8 +21,9 @@
  * │ `cascade.markdown` is `undefined` in two real, common cases              │
  * │ (`cascade.ts`): the layout probe called the PDF SCANNED (Tier 1 is        │
  * │ short-circuited entirely — there is no markdown to emit), or             │
- * │ `emitMarkdown()` returned undefined because the document was too sparse   │
- * │ for the positional emitter. In both, this oracle has NOTHING to read.     │
+ * │ `emitMarkdownFromLines()` returned undefined because the document was too │
+ * │ sparse for the positional emitter. In both, this oracle has NOTHING to    │
+ * │ read.                                                                    │
  * │                                                                          │
  * │ The clone this replaced coalesced that to `""` — so "the oracle could     │
  * │ not run" became indistinguishable from "the oracle ran and found no       │

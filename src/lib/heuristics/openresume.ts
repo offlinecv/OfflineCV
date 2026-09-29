@@ -34,6 +34,7 @@ import {
   type PdfSection,
 } from "./sections.ts";
 import { sectionizeMarkdown } from "./markdown-lines.ts";
+import { emitMarkdownFromLines } from "./markdown-emit.ts";
 import {
   extractName,
   extractHeadline,
@@ -151,36 +152,46 @@ function extractGroupedExperience(
   };
 }
 
+/** Options for {@link parseHeuristic}. */
+export interface ParseHeuristicOptions {
+  /**
+   * Emit markdown from the assembled lines and prefer the markdown-anchored
+   * section splitter. Off by default so callers that want the regex-on-line
+   * splitter (most unit tests) get it unchanged; the cascade turns it on.
+   */
+  emitMarkdown?: boolean;
+}
+
 /**
  * PDF-side Tier 1 entry point.
  *
- * When `markdown` is provided (the cascade already emitted it from the same
- * PDF items via `markdown-emit.ts`), we prefer the markdown-anchored section
- * splitter — it only treats a line as a header when the emitter already
- * promoted it via font-size ratio, filtering out body-font-size lines that
- * happen to match a section keyword. Falls back to the regex-on-line
- * splitter when markdown is absent or produced fewer than two canonical
- * sections (unstructured markdown likely means the emitter gave up). The
- * chosen path is recorded on `sectionSource` for confidence tuning and
- * funnel telemetry.
+ * Assembles the lines once (`groupIntoLines`) and, when `emitMarkdown` is on,
+ * renders markdown from those same lines (#651). The markdown-anchored
+ * section splitter then opens sections at the exact `PdfLine` objects the
+ * emitter promoted via font-size ratio — filtering out body-font-size lines
+ * that happen to match a section keyword — and the rendering rides out on
+ * `HeuristicResult.markdown` for the LLM prompts. Falls back to the
+ * regex-on-line splitter when emission is off, the document is too sparse
+ * for the emitter, or fewer than two canonical sections opened (unstructured
+ * markdown likely means the emitter gave up). The chosen path is recorded on
+ * `sectionSource` for confidence tuning and funnel telemetry.
  */
 export function parseHeuristic(
   items: PdfTextItem[],
-  _pages: PdfPageInfo[],
-  markdown?: string,
+  pages: PdfPageInfo[],
   annotations: PdfLinkAnnotation[] = [],
   boundaries?: Map<number, number>,
+  options: ParseHeuristicOptions = {},
 ): HeuristicResult {
   const lines = groupIntoLines(items, boundaries);
-  let sections: PdfSection[] | null = null;
-  let sectionSource: "markdown" | "regex" = "regex";
-  if (markdown && markdown.trim().length > 0) {
-    const mdSections = splitIntoSectionsWithMarkdown(lines, markdown);
-    if (mdSections) {
-      sections = mdSections;
-      sectionSource = "markdown";
-    }
-  }
+  const emission =
+    options.emitMarkdown && items.length > 0 && pages.length > 0
+      ? emitMarkdownFromLines(lines)
+      : undefined;
+  let sections: PdfSection[] | null = emission
+    ? splitIntoSectionsWithMarkdown(lines, emission.headings)
+    : null;
+  const sectionSource: "markdown" | "regex" = sections ? "markdown" : "regex";
   if (!sections) sections = splitIntoSections(lines, boundaries);
   // Multi-experience-section grouping (#311) is gated to single-column layouts:
   // a two-column sidebar flatten fragments ONE experience section into several
@@ -200,7 +211,7 @@ export function parseHeuristic(
   const nameFallbackProfile = singleColumn
     ? undefined
     : findNameFallbackProfile(items);
-  return buildHeuristicResult(
+  const result = buildHeuristicResult(
     lines,
     sections,
     sectionSource,
@@ -208,6 +219,7 @@ export function parseHeuristic(
     singleColumn,
     nameFallbackProfile,
   );
+  return emission ? { ...result, markdown: emission.markdown } : result;
 }
 
 /**

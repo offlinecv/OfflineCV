@@ -11,6 +11,10 @@
  * so importing it pulled that ~2000-line body into the entry chunk too.
  * `LINE_Y_EPS` and `mergeItemText` are re-exported for `sections.ts`, which
  * still needs both past its own section-splitting logic.
+ *
+ * Since #651 the markdown emitter no longer assembles lines of its own: it
+ * consumes the `PdfLine[]` this module builds for the parser, so a heading the
+ * emitter promotes is, by object identity, a line the section splitter sees.
  */
 
 import type { PdfTextItem } from "./types.ts";
@@ -486,4 +490,36 @@ export function mergeItemText(items: PdfTextItem[]): string {
     out += (needSpace ? " " : "") + strs[i];
   }
   return out.replace(/\s+/g, " ").trim();
+}
+
+// ── Line statistics ─────────────────────────────────────────────────────────
+
+/**
+ * Character-weighted mode of `maxFontSize` across lines — the document's body
+ * font size. Weighting by character count (rather than line count) keeps a
+ * header that spans several short lines from dominating the mode; the long
+ * body paragraphs win. Sizes are binned to 0.1pt to collapse the near-equal
+ * floats pdfjs sometimes emits. Returns 10pt for an empty document.
+ *
+ * Shared by the markdown emitter (heading promotion is a ratio against this)
+ * and the visual-header test in `sections.ts` (#651): both must measure the
+ * same baseline over the same lines, or a line one of them calls a heading the
+ * other calls body.
+ */
+export function computeBodyFontSize(lines: readonly PdfLine[]): number {
+  if (lines.length === 0) return 10;
+  const bins = new Map<number, number>();
+  for (const line of lines) {
+    const bin = Math.round(line.maxFontSize * 10) / 10;
+    bins.set(bin, (bins.get(bin) ?? 0) + line.text.trim().length);
+  }
+  let mode = 10;
+  let maxChars = 0;
+  for (const [size, chars] of bins.entries()) {
+    if (chars > maxChars) {
+      maxChars = chars;
+      mode = size;
+    }
+  }
+  return mode;
 }
