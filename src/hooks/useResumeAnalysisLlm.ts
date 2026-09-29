@@ -244,8 +244,15 @@ export function useResumeAnalysisLlm(
   }, []);
 
   // A fresh parse (new file) resets the panels — keyed on the parse identity,
-  // never on `result` (see the docblock).
+  // never on `result` (see the docblock). A run already in flight for the
+  // stale parse is not truly cancellable (no AbortController in this hook —
+  // see `runSeqRef` below), so this also bumps the run sequence and frees
+  // `inFlightRef`: the stale run's own writes are then gated out by
+  // `isCurrent()`, and a new `run()` for the incoming résumé is not blocked
+  // behind the old one settling (#1099).
   useEffect(() => {
+    runSeqRef.current++;
+    inFlightRef.current = false;
     setStatus({ kind: "idle" });
   }, [resetKey]);
 
@@ -270,13 +277,25 @@ export function useResumeAnalysisLlm(
     abortControllerRef.current?.abort("user" satisfies AbortReason);
   }, []);
 
+  // Bumped by the `resetKey` effect (#1099). Mirrors `useDownloadPdf`'s
+  // `renderSeqRef`: model load has no cancel path (`stop()` only reaches a
+  // running phase's `AbortController`), so a reset mid-load still can't stop
+  // that in-flight `loadEngine` call — it keeps computing, but every write it
+  // would make to `status` is gated on `runSeqRef.current` still matching the
+  // sequence number it captured at the start, so a résumé swapped in mid-run
+  // never sees the old résumé's findings land on top of it.
+  const runSeqRef = useRef(0);
+
   const run = useCallback(async () => {
     if (inFlightRef.current || isBusy) return;
     inFlightRef.current = true;
+    const seq = ++runSeqRef.current;
+    const isCurrent = () => runSeqRef.current === seq;
     const modelId = SHIPPED_MODEL.id;
     try {
       // Consent first (#1015): a decline leaves the panel as it was.
       if (!(await requestModelConsent())) return;
+      if (!isCurrent()) return;
       // #148 contract — acquire before the engine await.
       acquireInference(modelId);
       try {
@@ -285,8 +304,11 @@ export function useResumeAnalysisLlm(
           progress: { progress: 0, text: "Starting…" },
         });
         const engine = await loadEngine(modelId, (progress) => {
-          setStatus({ kind: "loading", progress });
+          if (isCurrent()) setStatus({ kind: "loading", progress });
         });
+        // A reset mid-load: stop here rather than spending an inference pass
+        // on a résumé nobody is looking at anymore.
+        if (!isCurrent()) return;
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
@@ -301,7 +323,7 @@ export function useResumeAnalysisLlm(
           phase: AnalysisPhase,
           fn: (signal: AbortSignal) => Promise<T>,
         ): Promise<T> => {
-          setStatus({ kind: "running", phase, tokens: 0 });
+          if (isCurrent()) setStatus({ kind: "running", phase, tokens: 0 });
           const phaseStart = Date.now();
           const timer = setTimeout(() => {
             controller.abort("deadline" satisfies AbortReason);
@@ -333,8 +355,9 @@ export function useResumeAnalysisLlm(
             engine,
             {
               signal,
-              onProgress: (info) =>
-                setStatus({ kind: "running", ...info }),
+              onProgress: (info) => {
+                if (isCurrent()) setStatus({ kind: "running", ...info });
+              },
             },
           ),
         );
@@ -347,9 +370,17 @@ export function useResumeAnalysisLlm(
         const critique = await runPhase("critique", (signal) =>
           critiqueResumeWithLlm(result.canonical.fields, engine, {
             signal,
-            onProgress: (info) => setStatus({ kind: "running", ...info }),
+            onProgress: (info) => {
+              if (isCurrent()) setStatus({ kind: "running", ...info });
+            },
           }),
         );
+
+        // A reset landed while the two inference calls above were in flight.
+        // They cannot be aborted, but their result belongs to a résumé that
+        // is no longer on screen — drop it without writing status or firing
+        // telemetry for a pass the panel never showed.
+        if (!isCurrent()) return;
 
         // ── Telemetry: the LLM pass ran (sets llm_ran:true downstream). ──
         trackLlmParseRan({ model: modelId });
@@ -399,18 +430,24 @@ export function useResumeAnalysisLlm(
         });
       } catch (err) {
         if (err instanceof PhaseAbortedError) {
-          trackAnalysisAborted({
-            model: modelId,
-            phase: err.phase,
-            reason: err.reason,
-            durationMs: err.durationMs,
-          });
-          setStatus(
-            err.reason === "user"
-              ? { kind: "idle" }
-              : { kind: "error", message: DEADLINE_MESSAGE },
-          );
-        } else {
+          // A stale run's own deadline timer can still fire after a reset —
+          // the result belongs to a résumé that's no longer on screen, so
+          // neither the status write nor the telemetry should land (mirrors
+          // the `isCurrent()` guard on a successful stale run above).
+          if (isCurrent()) {
+            trackAnalysisAborted({
+              model: modelId,
+              phase: err.phase,
+              reason: err.reason,
+              durationMs: err.durationMs,
+            });
+            setStatus(
+              err.reason === "user"
+                ? { kind: "idle" }
+                : { kind: "error", message: DEADLINE_MESSAGE },
+            );
+          }
+        } else if (isCurrent()) {
           setStatus({
             kind: "error",
             message:
@@ -424,7 +461,10 @@ export function useResumeAnalysisLlm(
         releaseInference(modelId);
       }
     } finally {
-      inFlightRef.current = false;
+      // Only the still-current run may clear the flag — a reset already
+      // cleared it up front, and a NEWER run may have since set it back to
+      // true, which this stale `finally` must not clobber.
+      if (isCurrent()) inFlightRef.current = false;
     }
   }, [result, isBusy]);
 
