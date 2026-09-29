@@ -26,6 +26,7 @@ import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore } from "../lib/score/score.ts";
 import { BLANK_DRAFT_STORAGE_KEY } from "./useResumeAnalysis.ts";
+import * as renderModule from "../lib/pdf/render-ats-pdf.ts";
 
 const tracked: Array<{ source: string; format?: string }> = [];
 vi.mock("../lib/analytics.ts", () => ({
@@ -262,6 +263,123 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
     expect(tracked).toEqual([{ source: "upload", format: "pdf" }]);
     // #826 — the bytes reached the user, so the Download stage is done.
     expect(onDownloaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses on render() and leaves preview null when the fallback would mangle the name", async () => {
+    mountFresh(namedResult("ANNA WIŚNIEWSKA"));
+
+    await act(async () => {
+      await api.render();
+    });
+
+    expect(api.error).toContain("Name");
+    expect(api.preview).toBeNull();
+    expect(api.isRendering).toBe(false);
+    expect(tracked).toEqual([]);
+    expect(onDownloaded).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDownloadPdf — render / save split (#1077)", () => {
+  it("render() populates preview without triggering download, analytics, or onDownloaded", async () => {
+    mount(uploadedResult());
+    await act(async () => {
+      await api.render();
+    });
+
+    expect(api.preview).not.toBeNull();
+    expect(api.preview?.bytes).toBeInstanceOf(Uint8Array);
+    expect(api.preview?.pages).toBeGreaterThanOrEqual(1);
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+    expect(tracked).toEqual([]);
+    expect(onDownloaded).not.toHaveBeenCalled();
+  });
+
+  it("download() after render() reuses the previewed bytes without re-rendering", async () => {
+    mount(uploadedResult());
+    const renderSpy = vi.spyOn(renderModule, "renderAtsResumePdf");
+
+    await act(async () => {
+      await api.render();
+    });
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    const previewBytes = api.preview?.bytes;
+    expect(previewBytes).toBeDefined();
+
+    await act(async () => {
+      await api.download();
+    });
+
+    // Did not call renderAtsResumePdf a second time
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+    expect(tracked).toEqual([{ source: "upload", format: "pdf" }]);
+    expect(onDownloaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates preview when result changes", async () => {
+    const res1 = uploadedResult();
+    mount(res1);
+    await act(async () => {
+      await api.render();
+    });
+    expect(api.preview).not.toBeNull();
+
+    // Re-mount probe with new result
+    const res2 = {
+      ...res1,
+      canonical: {
+        ...res1.canonical,
+        fields: { ...res1.canonical.fields, full_name: "Different Name" },
+      },
+    };
+    act(() => root.render(<Probe result={res2} />));
+
+    expect(api.preview).toBeNull();
+  });
+
+  it("a download whose input changed mid-render still saves, but leaves the new preview alone", async () => {
+    const res1 = uploadedResult();
+    mount(res1);
+
+    // Hold the render open so the edit lands while the export is in flight.
+    const realRender = renderModule.renderAtsResumePdf;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(renderModule, "renderAtsResumePdf").mockImplementation(
+      async (model) => {
+        await gate;
+        return realRender(model);
+      },
+    );
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = api.download();
+    });
+
+    const res2 = {
+      ...res1,
+      canonical: {
+        ...res1.canonical,
+        fields: { ...res1.canonical.fields, full_name: "Different Name" },
+      },
+    };
+    act(() => root.render(<Probe result={res2} />));
+
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    // The click that started the export still gets its file…
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+    expect(tracked).toEqual([{ source: "upload", format: "pdf" }]);
+    // …but the previous résumé's bytes never reach the current preview.
+    expect(api.preview).toBeNull();
+    expect(api.isGenerating).toBe(false);
   });
 });
 

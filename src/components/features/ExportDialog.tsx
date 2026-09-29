@@ -74,6 +74,7 @@ import {
 import { ExportGateBody, fixFirstGap } from "./ExportGateBody.tsx";
 import { ExportRow, ExportReportRow } from "./ExportRows.tsx";
 import { ExportFindings } from "./ExportFindings.tsx";
+import { ExportPdfPreview } from "./ExportPdfPreview.tsx";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 import { useDownloadMarkdown } from "../../hooks/useDownloadMarkdown.ts";
 import { useDownloadReport } from "../../hooks/useDownloadReport.ts";
@@ -153,6 +154,13 @@ export function ExportDialog({
     result.canonical.fields.experience.length > 0,
   );
 
+  // Trigger preview generation when dialog opens or inputs change while open (#1077).
+  useEffect(() => {
+    if (open) {
+      void pdf.render();
+    }
+  }, [open, pdf.render]);
+
   // Every exit resets the body, so reopening never lands on a checklist the
   // user has already answered. Esc and the backdrop route here through
   // `Dialog`'s own `onClose`.
@@ -185,7 +193,7 @@ export function ExportDialog({
       open={open}
       onClose={close}
       title={body === "gate" ? "Missing before download" : "Download"}
-      className="max-w-md"
+      className={body === "gate" ? "max-w-md" : "w-[min(64rem,95vw)] max-w-5xl"}
     >
       {body === "gate" ? (
         <ExportGateBody
@@ -201,62 +209,70 @@ export function ExportDialog({
           ref={formatsBody}
           tabIndex={-1}
           aria-live="polite"
-          className="flex flex-col gap-4 focus:outline-hidden"
+          className="flex flex-col md:flex-row gap-6 focus:outline-hidden"
         >
-          <ExportRow
-            title="Résumé (PDF)"
-            description="A clean, single-column PDF built from the résumé on this page, including your edits. This is the ATS-safe artifact — there is no other version to pick."
+          <ExportPdfPreview
+            preview={pdf.preview}
+            isRendering={pdf.isRendering}
             error={pdf.error}
-          >
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handlePdf}
-              disabled={pdf.isGenerating}
-            >
-              {pdf.isGenerating ? "Generating…" : "Download PDF"}
-            </Button>
-            {/* What the export could not draw cleanly (#621) — advisory, and
-                renders NOTHING for the clean résumé that is the common case.
-                It sits on the row that produced the file, beside the row's own
-                `ErrorState`, because that is the surface already mounted. */}
-            <ExportFindings findings={pdf.findings} />
-          </ExportRow>
-
-          <ExportRow
-            title="Résumé (Markdown)"
-            description="The same résumé as a plain-text cv.md file, for editing elsewhere or handing to another tool."
-            error={markdown.error}
-          >
-            {/* No pre-download checklist here, unlike the PDF: cv.md is a
-                plain-text interchange file, not an ATS-submitted artifact, so
-                the missing-name/contact/experience nudge that protects the PDF
-                does not apply. */}
-            {/* `secondary`, not `ghost` — see `ExportRows`' report button for
-                the ladder. Quieter than the PDF above it, but still a button. */}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void markdown.download()}
-              disabled={markdown.isGenerating}
-            >
-              {markdown.isGenerating ? "Generating…" : "Download Markdown"}
-            </Button>
-          </ExportRow>
-
-          <ExportReportRow
-            report={report}
-            formatName={formatName}
-            format={reportFormat}
-            onFormatChange={setReportFormat}
-            includeIdentity={includeIdentity}
-            onIncludeIdentityChange={setIncludeIdentity}
           />
 
-          <div className="flex justify-end">
-            <Button variant="ghost" size="sm" onClick={close}>
-              Close
-            </Button>
+          <div className="flex flex-col gap-4 flex-1 min-w-0">
+            <ExportRow
+              title="Résumé (PDF)"
+              description="A clean, single-column PDF built from the résumé on this page, as shown in the preview, including your edits. This is the ATS-safe artifact — there is no other version to pick."
+              error={pdf.error}
+            >
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handlePdf}
+                disabled={pdf.isGenerating || pdf.isRendering}
+              >
+                {pdf.isGenerating ? "Generating…" : "Download PDF"}
+              </Button>
+              {/* What the export could not draw cleanly (#621) — advisory, and
+                  renders NOTHING for the clean résumé that is the common case.
+                  It sits on the row that produced the file, beside the row's own
+                  `ErrorState`, because that is the surface already mounted. */}
+              <ExportFindings findings={pdf.findings} />
+            </ExportRow>
+
+            <ExportRow
+              title="Résumé (Markdown)"
+              description="The same résumé as a plain-text cv.md file, for editing elsewhere or handing to another tool."
+              error={markdown.error}
+            >
+              {/* No pre-download checklist here, unlike the PDF: cv.md is a
+                  plain-text interchange file, not an ATS-submitted artifact, so
+                  the missing-name/contact/experience nudge that protects the PDF
+                  does not apply. */}
+              {/* `secondary`, not `ghost` — see `ExportRows`' report button for
+                  the ladder. Quieter than the PDF above it, but still a button. */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void markdown.download()}
+                disabled={markdown.isGenerating}
+              >
+                {markdown.isGenerating ? "Generating…" : "Download Markdown"}
+              </Button>
+            </ExportRow>
+
+            <ExportReportRow
+              report={report}
+              formatName={formatName}
+              format={reportFormat}
+              onFormatChange={setReportFormat}
+              includeIdentity={includeIdentity}
+              onIncludeIdentityChange={setIncludeIdentity}
+            />
+
+            <div className="flex justify-end pt-2">
+              <Button variant="ghost" size="sm" onClick={close}>
+                Close
+              </Button>
+            </div>
           </div>
         </div>
       )}
