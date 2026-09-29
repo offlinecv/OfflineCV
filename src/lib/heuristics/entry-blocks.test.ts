@@ -1066,6 +1066,21 @@ describe("parseEntryBlocks — welded company … City, ST row above the date an
     expect(blocks[0].aboveAnchorLocation).toBe("Berkeley, CA");
   });
 
+  it("peels an emphasis-wrapped city cleanly, without the literal underscores (#1090)", () => {
+    const blocks = parseEntryBlocks(
+      {
+        name: "experience",
+        lines: [
+          weldedRow("Freelance", "_Berkeley, CA_", 100),
+          plain("English Tutor Mar 2023 - Dec 2024", 36, 113),
+          plain("• Instructed eight high school students in writing", 54, 126),
+        ],
+      },
+      cfg,
+    );
+    expect(blocks[0].aboveAnchorLocation).toBe("Berkeley, CA");
+  });
+
   it("peels the city off a longer company that already carries a comma", () => {
     const blocks = parseEntryBlocks(
       {

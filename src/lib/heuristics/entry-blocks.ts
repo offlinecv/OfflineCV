@@ -40,7 +40,7 @@ import {
   dateSeparator,
   parseDateRange,
   stripDateRange,
-  isBareLocationString,
+  resolveBareLocationString,
   isBulletLine,
   isPageFurniture,
   isProseLine,
@@ -1363,7 +1363,10 @@ function nextHeaderStart(
  * `splitOnFlushRightGap` recovers the seam from the geometry; this function
  * decides whether to act on it. The gate is deliberately narrow: the trailer
  * must whole-match the closed bare-location/work-mode vocabulary
- * (`isBareLocationString`), so an ordinary multi-word title never splits, and
+ * (`resolveBareLocationString`, whose cleaned return value — not the raw
+ * trailer — is what gets stored, so an emphasis-wrapped trailer like
+ * "_Springfield, IL_" loses its literal underscores rather than carrying them
+ * into `entry.location`), so an ordinary multi-word title never splits, and
  * the #425 flush-right-DATE shape — the other thing templates park at the right
  * margin — is not a bare location and stays merged onto its header line.
  *
@@ -1387,8 +1390,10 @@ function nextHeaderStart(
 function peelFlushRightLocation(line: PdfLine): PdfLine[] {
   const split = splitOnFlushRightGap(line.items);
   if (!split) return [line];
-  const trailerText = mergeItemText(split.trailer).trim();
-  if (!trailerText || !isBareLocationString(trailerText)) return [line];
+  const rawTrailerText = mergeItemText(split.trailer).trim();
+  if (!rawTrailerText) return [line];
+  const trailerText = resolveBareLocationString(rawTrailerText);
+  if (trailerText === undefined) return [line];
   const headText = mergeItemText(split.head).trim();
   if (!headText) return [line];
   return [
