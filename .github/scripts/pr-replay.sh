@@ -259,8 +259,8 @@ cmd_publish() {
   git -c user.name="$APP_BOT" -c user.email="$bot_email" commit -q --author="$author" -F "$msg"
   rm -f "$msg"
 
-  # `npm ci` installs the repo's pre-push hook, which would run the whole
-  # `verify` here; CI runs it on the push anyway. Push chatter goes to stderr:
+  # A pre-push hook, where one is installed, would run the whole `verify`
+  # here; CI runs it on the push anyway. Push chatter goes to stderr:
   # stdout is this command's key=value result.
   if ! OFFLINECV_SKIP_HOOKS=1 git push -q --force-with-lease="refs/heads/$BRANCH:$HEAD_SHA" \
       origin "HEAD:refs/heads/$BRANCH" >&2; then
