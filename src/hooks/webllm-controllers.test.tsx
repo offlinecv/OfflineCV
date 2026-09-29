@@ -672,6 +672,165 @@ describe("useResumeAnalysisLlm", () => {
       await stalePromise;
     });
   });
+
+  it("a reset aborts the active AbortController with the reset reason, and the phase's streaming call sees it (#1103)", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    vi.mocked(analyzeResumeWithLlm).mockImplementationOnce(
+      (_input, _engine, opts) =>
+        new Promise((_resolve, reject) => {
+          capturedSignal = opts?.signal;
+          opts?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Analysis aborted.", "AbortError"));
+          });
+        }),
+    );
+
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    function Probe({ r, parseKey }: { r: CascadeResult; parseKey: unknown }) {
+      sink.current = useResumeAnalysisLlm(r, parseKey);
+      return null;
+    }
+    const parseKeyA = {};
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKeyA} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = sink.current!.run();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sink.current!.status.kind).toBe("running");
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // A new résumé arrives mid-phase — the reset effect aborts the run
+    // directly, rather than just fencing its writes.
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={{}} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(capturedSignal?.reason).toBe("reset");
+
+    await act(async () => {
+      await runPromise;
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+    // A reset is not a user Stop — it must never report as one.
+    expect(trackAnalysisAborted).not.toHaveBeenCalled();
+    expect(releaseInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+  });
+
+  it("a stale run settling after reset does not null a newer run's AbortController (#1104)", async () => {
+    let resolveAnalyzeA!: (v: {
+      parse: ReturnType<typeof stubLlmParse>;
+      critique: { bulletFindings: never[]; missingSections: never[] };
+    }) => void;
+    let signalB: AbortSignal | undefined;
+    vi.mocked(analyzeResumeWithLlm)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveAnalyzeA = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        (_input, _engine, opts) =>
+          new Promise((_resolve, reject) => {
+            signalB = opts?.signal;
+            opts?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Analysis aborted.", "AbortError"));
+            });
+          }),
+      );
+
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    function Probe({ r, parseKey }: { r: CascadeResult; parseKey: unknown }) {
+      sink.current = useResumeAnalysisLlm(r, parseKey);
+      return null;
+    }
+    const parseKeyA = {};
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKeyA} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Run A starts and reaches the paused parse phase.
+    let runAPromise!: Promise<void>;
+    await act(async () => {
+      runAPromise = sink.current!.run();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sink.current!.status.kind).toBe("running");
+
+    // A new résumé arrives — resets the panel and frees inFlightRef, but run
+    // A's paused promise (its non-cancellable engine call) keeps running.
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={{}} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+
+    // Run B starts immediately behind the freed inFlightRef and reaches its
+    // own paused parse phase, owning a fresh AbortController.
+    let runBPromise!: Promise<void>;
+    await act(async () => {
+      runBPromise = sink.current!.run();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sink.current!.status.kind).toBe("running");
+    expect(signalB?.aborted).toBe(false);
+
+    // Run A settles normally (its engine call was never actually
+    // cancellable) while B is still running.
+    await act(async () => {
+      resolveAnalyzeA({
+        parse: stubLlmParse(),
+        critique: { bulletFindings: [], missingSections: [] },
+      });
+      await runAPromise;
+    });
+    expect(sink.current!.status.kind).toBe("running");
+
+    // Stop must still reach run B's controller — A's stale `finally` must
+    // not have nulled it out from under B (#1104).
+    await act(async () => {
+      sink.current!.stop();
+      await runBPromise;
+    });
+    expect(signalB?.aborted).toBe(true);
+    expect(signalB?.reason).toBe("user");
+    // ...and the abort must actually route B back to idle, not just reach
+    // its controller — a broken routing would leave "running" or "done"
+    // behind, since A's stale settle already proved status.kind survives.
+    expect(sink.current!.status.kind).toBe("idle");
+    expect(trackAnalysisAborted).toHaveBeenCalledWith({
+      model: SHIPPED_MODEL.id,
+      phase: "parse",
+      reason: "user",
+      durationMs: expect.any(Number),
+    });
+  });
 });
 
 describe("useLlmEscapeHatch", () => {
