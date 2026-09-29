@@ -9,7 +9,7 @@
  */
 
 import "fake-indexeddb/auto";
-import { deleteDB } from "idb";
+import { deleteDB, openDB } from "idb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DB_NAME, getDB, closeDB } from "./db.ts";
 import {
@@ -45,6 +45,14 @@ describe("storage: schema", () => {
     const db = await getDB();
     expect(db.objectStoreNames.contains("resumes")).toBe(true);
     expect(db.objectStoreNames.contains("jobs")).toBe(true);
+  });
+
+  it("closeDB resolves after a failed open, so a suite reset still reaches deleteDB", async () => {
+    // A database already ahead of DB_VERSION makes getDB()'s versioned open
+    // reject with VersionError; there is no connection for closeDB to close.
+    (await openDB(DB_NAME, 999)).close();
+    await expect(getDB()).rejects.toThrow();
+    await expect(closeDB()).resolves.toBeUndefined();
   });
 });
 
