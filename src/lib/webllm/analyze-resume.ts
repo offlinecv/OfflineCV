@@ -40,7 +40,8 @@
  * the standalone passes.
  */
 
-import type { WebLlmEngine } from "./types.ts";
+import type { AnalysisProgressInfo, WebLlmEngine } from "./types.ts";
+import { streamCompletion } from "./stream-completion.ts";
 import { tryParseJsonObject } from "./json-repair.ts";
 import {
   coerceLlmParsedResume,
@@ -221,12 +222,21 @@ function coerceCritiqueHalf(raw: unknown): ResumeCritique {
  *
  * Returns a validated `CombinedAnalysis`. On irrecoverable JSON parse
  * failure the safe empty shape (empty parse + empty critique) is returned —
- * this function NEVER throws to the caller. On partial JSON failure, only the
- * malformed half collapses to its safe empty shape; the other half is kept.
+ * this function NEVER throws to the caller for an ordinary engine failure.
+ * On partial JSON failure, only the malformed half collapses to its safe
+ * empty shape; the other half is kept. The one exception is cancellation
+ * (#1095): when `opts.signal` fires mid-stream this DOES throw, so the
+ * caller's per-phase abort/deadline handling (`useResumeAnalysisLlm.ts`)
+ * sees it rather than a silently-empty "done" result.
  */
 export async function analyzeResumeWithLlm(
   input: { rawText: string; markdown?: string },
   engine: WebLlmEngine,
+  opts: {
+    signal?: AbortSignal;
+    /** Streamed token-count progress (#1095) — always reports `phase: "parse"`. */
+    onProgress?: (info: AnalysisProgressInfo) => void;
+  } = {},
 ): Promise<CombinedAnalysis> {
   // Max tokens: the parse alone needs ~600 (parse-resume.ts uses 1024). The
   // critique adds ~60 per bullet plus the meta object. The old summed budget
@@ -237,19 +247,24 @@ export async function analyzeResumeWithLlm(
   // here kills the top-level JSON parse and collapses BOTH halves to safe
   // empty shapes — over-budgeting is cheap, under-budgeting is a hard failure.
   const MAX_TOKENS = 3072;
+  const { signal, onProgress } = opts;
 
   let raw = "";
   try {
-    const response = await engine.chat.completions.create({
-      messages: [
+    raw = await streamCompletion(
+      engine,
+      [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: buildUserPrompt(input) },
       ],
-      temperature: 0, // deterministic JSON output
-      max_tokens: MAX_TOKENS,
-    });
-    raw = response.choices[0]?.message?.content ?? "";
+      MAX_TOKENS,
+      {
+        signal,
+        onTokens: (tokens) => onProgress?.({ tokens, phase: "parse" }),
+      },
+    );
   } catch (err) {
+    if (signal?.aborted) throw err;
     // Engine error (OOM, context overflow, etc.) — return safe shape, no throw.
     console.warn("[analyze-resume] engine.chat.completions.create failed:", err);
     return emptyCombined();

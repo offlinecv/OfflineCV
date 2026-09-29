@@ -15,6 +15,11 @@
  *   - Garbage / empty output → safe empty shapes for both halves, no throw.
  *   - Engine throw → safe empty shapes, no throw.
  *   - Prefers markdown over rawText in the user prompt.
+ *   - Streaming (#1095): a streaming-engine stub reports increasing token
+ *     progress via `onProgress`; an aborted `signal` throws (rather than
+ *     degrading to the empty shape) so the caller's cancellation is visible;
+ *     a `create()` call that never resolves still unblocks the moment the
+ *     signal fires, proving the deadline race actually races.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -22,7 +27,11 @@ import {
   analyzeResumeWithLlm,
   type CombinedAnalysis,
 } from "./analyze-resume.ts";
-import type { WebLlmEngine, ChatCompletionRequest } from "./types.ts";
+import type {
+  WebLlmEngine,
+  ChatCompletionRequest,
+  ChatCompletionChunk,
+} from "./types.ts";
 
 // ── Engine factories ──────────────────────────────────────────────────────────
 
@@ -43,6 +52,39 @@ function makeThrowingEngine(err: unknown): WebLlmEngine {
     chat: {
       completions: {
         create: vi.fn().mockRejectedValue(err),
+      },
+    },
+  };
+}
+
+/** Splits `content` into `parts` streamed chunks, yielding one per microtask. */
+function makeStreamingEngine(content: string, parts: number): WebLlmEngine {
+  const step = Math.ceil(content.length / parts);
+  const chunks: ChatCompletionChunk[] = [];
+  for (let i = 0; i < content.length; i += step) {
+    chunks.push({ choices: [{ delta: { content: content.slice(i, i + step) } }] });
+  }
+  async function* iterate() {
+    for (const chunk of chunks) {
+      await Promise.resolve();
+      yield chunk;
+    }
+  }
+  return {
+    chat: {
+      completions: {
+        create: vi.fn().mockImplementation(async () => iterate()),
+      },
+    },
+  };
+}
+
+/** Never resolves — the shape a hung/OOM'd real engine would take. */
+function makeHangingEngine(): WebLlmEngine {
+  return {
+    chat: {
+      completions: {
+        create: vi.fn().mockImplementation(() => new Promise(() => {})),
       },
     },
   };
@@ -238,5 +280,68 @@ describe("analyzeResumeWithLlm", () => {
       .mock.calls[0]![0] as ChatCompletionRequest;
     const userMsg = call.messages.find((m) => m.role === "user");
     expect(userMsg!.content).toContain("ONLY-RAW");
+  });
+
+  it("reports increasing token progress from a streaming engine (#1095)", async () => {
+    const engine = makeStreamingEngine(JSON.stringify(FULL_VALID_WIRE), 4);
+    const seen: number[] = [];
+    const result = await analyzeResumeWithLlm(
+      { rawText: "resume text" },
+      engine,
+      { onProgress: (info) => seen.push(info.tokens) },
+    );
+    expect(result).toEqual(EXPECTED_FULL);
+    expect(seen.length).toBeGreaterThan(1);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]!).toBeGreaterThan(seen[i - 1]!);
+    }
+  });
+
+  it("every progress report names phase 'parse'", async () => {
+    const engine = makeStreamingEngine(JSON.stringify(FULL_VALID_WIRE), 3);
+    const phases = new Set<string>();
+    await analyzeResumeWithLlm({ rawText: "resume text" }, engine, {
+      onProgress: (info) => phases.add(info.phase),
+    });
+    expect([...phases]).toEqual(["parse"]);
+  });
+
+  it("throws (does not degrade to empty) when the signal is already aborted", async () => {
+    const engine = makeStreamingEngine(JSON.stringify(FULL_VALID_WIRE), 3);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      analyzeResumeWithLlm(
+        { rawText: "resume text" },
+        engine,
+        { signal: controller.signal },
+      ),
+    ).rejects.toBeTruthy();
+  });
+
+  it("aborting mid-stream stops consumption and rejects", async () => {
+    const engine = makeStreamingEngine(JSON.stringify(FULL_VALID_WIRE), 6);
+    const controller = new AbortController();
+    const runPromise = analyzeResumeWithLlm(
+      { rawText: "resume text" },
+      engine,
+      {
+        signal: controller.signal,
+        onProgress: () => controller.abort(),
+      },
+    );
+    await expect(runPromise).rejects.toBeTruthy();
+  });
+
+  it("a create() call that never resolves still unblocks once aborted", async () => {
+    const engine = makeHangingEngine();
+    const controller = new AbortController();
+    const runPromise = analyzeResumeWithLlm(
+      { rawText: "resume text" },
+      engine,
+      { signal: controller.signal },
+    );
+    controller.abort();
+    await expect(runPromise).rejects.toBeTruthy();
   });
 });

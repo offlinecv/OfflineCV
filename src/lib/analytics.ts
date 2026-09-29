@@ -387,6 +387,11 @@ export function trackRenderError(args: { errorName: string }): void {
  * scorer's `bulletHasMetric` disagreed with and downgraded to `ok` — a
  * standing rate here is the signal that the prompt tightening in
  * `critique-resume.ts` needs another pass.
+ *
+ * `durationMs` (#1095) is the critique phase's own wall-clock time — from the
+ * moment `useResumeAnalysisLlm.run()` started the critique pass to the moment
+ * it resolved — so a slow-device regression shows up as a shift in this
+ * event's duration distribution, not just as a support report.
  */
 export function trackCritiqueRan(args: {
   model: string;
@@ -394,6 +399,7 @@ export function trackCritiqueRan(args: {
   flaggedCount: number;
   missingSectionCount: number;
   metricOverrides: number;
+  durationMs: number;
 }): void {
   track("llm_critique_ran", {
     model: args.model,
@@ -401,6 +407,30 @@ export function trackCritiqueRan(args: {
     flagged_count: args.flaggedCount,
     missing_section_count: args.missingSectionCount,
     metric_overrides: args.metricOverrides,
+    duration_ms: args.durationMs,
+  });
+}
+
+/**
+ * A "Local AI feedback" run was aborted before reaching `done` (#1095) —
+ * either the user clicked Stop, or the per-phase deadline elapsed on a
+ * device too slow/memory-constrained to finish in a reasonable time.
+ * `phase` + `durationMs` say WHERE and how long the run got before it was
+ * cut off, so a spike in `reason: "deadline"` events is a direct signal that
+ * the shipped model is too slow for a meaningful slice of devices — no
+ * bullet text, no field values, no PII.
+ */
+export function trackAnalysisAborted(args: {
+  model: string;
+  phase: "parse" | "critique";
+  reason: "user" | "deadline";
+  durationMs: number;
+}): void {
+  track("llm_analysis_aborted", {
+    model: args.model,
+    phase: args.phase,
+    reason: args.reason,
+    duration_ms: args.durationMs,
   });
 }
 
