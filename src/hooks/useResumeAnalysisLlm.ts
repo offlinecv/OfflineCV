@@ -184,14 +184,17 @@ const PHASE_DEADLINE_MS = 4 * 60 * 1000;
 const DEADLINE_MESSAGE =
   "This is taking longer than expected — the on-device model may be short on memory. Close other tabs and try again.";
 
-type AbortReason = "user" | "deadline";
+type AbortReason = "user" | "deadline" | "reset";
 
 /**
- * Thrown by `runPhase` (below) when its `AbortController` fires — either the
- * user clicked Stop or the phase's own deadline timer elapsed. Distinct from
- * every other error `run()` can catch so the `catch` block can route the two
- * outcomes differently: `"user"` returns to `idle` silently, `"deadline"`
- * surfaces `kind: "error"` with a memory hint.
+ * Thrown by `runPhase` (below) when its `AbortController` fires — the user
+ * clicked Stop, the phase's own deadline timer elapsed, or the `resetKey`
+ * effect aborted a stale run out from under a résumé swap (#1103). Distinct
+ * from every other error `run()` can catch so the `catch` block can route the
+ * three outcomes differently: `"user"` returns to `idle` silently,
+ * `"deadline"` surfaces `kind: "error"` with a memory hint, `"reset"` writes
+ * nothing at all — the `resetKey` effect already put `status` back to `idle`
+ * for the résumé that's actually on screen.
  */
 class PhaseAbortedError extends Error {
   constructor(
@@ -244,15 +247,21 @@ export function useResumeAnalysisLlm(
   }, []);
 
   // A fresh parse (new file) resets the panels — keyed on the parse identity,
-  // never on `result` (see the docblock). A run already in flight for the
-  // stale parse is not truly cancellable (no AbortController in this hook —
-  // see `runSeqRef` below), so this also bumps the run sequence and frees
-  // `inFlightRef`: the stale run's own writes are then gated out by
-  // `isCurrent()`, and a new `run()` for the incoming résumé is not blocked
-  // behind the old one settling (#1099).
+  // never on `result` (see the docblock). This aborts the active run's
+  // `AbortController` (#1098) with the `"reset"` reason, which stops further
+  // stream consumption and keeps the second phase from starting on a résumé
+  // nobody is looking at anymore (#1103) — cancellation is boundary-based
+  // (`stream-completion.ts`'s docblock), so an already-dispatched generation
+  // may keep running in the background regardless. The `runSeqRef` bump still
+  // matters on its own: model load has no cancel path (`stop`'s docblock),
+  // so a reset mid-load can't stop that in-flight `loadEngine` call — the
+  // sequence fence is what keeps its eventual result from landing. Both also
+  // free `inFlightRef` immediately so a new `run()` for the incoming résumé
+  // is not blocked behind the old one settling (#1099).
   useEffect(() => {
     runSeqRef.current++;
     inFlightRef.current = false;
+    abortControllerRef.current?.abort("reset" satisfies AbortReason);
     setStatus({ kind: "idle" });
   }, [resetKey]);
 
@@ -332,8 +341,11 @@ export function useResumeAnalysisLlm(
             return await fn(controller.signal);
           } catch (err) {
             if (controller.signal.aborted) {
+              const signalReason = controller.signal.reason as AbortReason;
               const reason: AbortReason =
-                controller.signal.reason === "user" ? "user" : "deadline";
+                signalReason === "user" || signalReason === "reset"
+                  ? signalReason
+                  : "deadline";
               throw new PhaseAbortedError(
                 phase,
                 reason,
@@ -430,11 +442,18 @@ export function useResumeAnalysisLlm(
         });
       } catch (err) {
         if (err instanceof PhaseAbortedError) {
-          // A stale run's own deadline timer can still fire after a reset —
-          // the result belongs to a résumé that's no longer on screen, so
-          // neither the status write nor the telemetry should land (mirrors
-          // the `isCurrent()` guard on a successful stale run above).
-          if (isCurrent()) {
+          if (err.reason === "reset") {
+            // The `resetKey` effect aborted this run directly (#1103) — it
+            // already put `status` back to `idle` for the résumé that's
+            // actually on screen, so this writes nothing and does not emit
+            // `trackAnalysisAborted` (that event means "the user waited on
+            // this and it didn't finish", which isn't true of a reset).
+          } else if (isCurrent()) {
+            // A stale run's own deadline timer can still fire after a
+            // reset — the result belongs to a résumé that's no longer on
+            // screen, so neither the status write nor the telemetry should
+            // land (mirrors the `isCurrent()` guard on a successful stale
+            // run above).
             trackAnalysisAborted({
               model: modelId,
               phase: err.phase,
@@ -457,7 +476,10 @@ export function useResumeAnalysisLlm(
           });
         }
       } finally {
-        abortControllerRef.current = null;
+        // Same guard as the `inFlightRef` clear below: a stale run settling
+        // after a reset (or racing a newer run's own controller into the
+        // ref) must not null out a run that is still current.
+        if (isCurrent()) abortControllerRef.current = null;
         releaseInference(modelId);
       }
     } finally {
