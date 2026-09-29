@@ -4,11 +4,10 @@
 /**
  * Unit tests for the PDF → markdown emitter. Covers the exported utility
  * functions individually, the `emitMarkdownFromLines` heading-identity
- * contract (#651), and end-to-end `emitMarkdown()` scenarios.
+ * contract (#651), and end-to-end rendering over assembled lines.
  */
 
 import {
-  emitMarkdown,
   emitMarkdownFromLines,
   isBulletLine,
   needsParagraphBreak,
@@ -17,7 +16,7 @@ import {
 } from "./markdown-emit.ts";
 import { computeBodyFontSize, groupIntoLines } from "./line-assembly.ts";
 import type { PdfLine } from "./line-model.ts";
-import { mkDefaultPages, mkItems } from "./__test-utils__/mkItem.ts";
+import { mkItems } from "./__test-utils__/mkItem.ts";
 
 /** A `PdfLine` literal with only the fields the emitter reads filled in. */
 function line(
@@ -199,9 +198,13 @@ describe("markdown-emit: emitMarkdownFromLines shares line objects with the pars
   });
 });
 
-describe("markdown-emit: emitMarkdown end-to-end", () => {
+describe("markdown-emit: end-to-end over assembled lines", () => {
+  /** The production shape: assemble with the shared assembler, then emit. */
+  const emit = (items: ReturnType<typeof mkItems>) =>
+    emitMarkdownFromLines(groupIntoLines(items))?.markdown;
+
   it("returns undefined for empty input", () => {
-    expect(emitMarkdown([], [])).toBeUndefined();
+    expect(emit([])).toBeUndefined();
   });
 
   it("returns undefined when too few lines to produce structure", () => {
@@ -209,7 +212,7 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
       { text: "Hi", lineIndex: 0 },
       { text: "there", lineIndex: 1 },
     ]);
-    expect(emitMarkdown(items, mkDefaultPages(items))).toBeUndefined();
+    expect(emit(items)).toBeUndefined();
   });
 
   it("renders a simple resume with headings, bullets, and body prose", () => {
@@ -222,7 +225,7 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
       { text: "• Shipped v2 of payments API", lineIndex: 6, fontSize: 10 },
       { text: "• Drove revenue 30%", lineIndex: 7, fontSize: 10 },
     ]);
-    const md = emitMarkdown(items, mkDefaultPages(items));
+    const md = emit(items);
     expect(md).toBeDefined();
     expect(md).toContain("# Priya Ramachandran");
     expect(md).toContain("## Experience");
@@ -240,7 +243,7 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
       { text: "Shipped v2 of payments API", lineIndex: 2, x: 84, fontSize: 10 },
       { text: "more body text on the next line", lineIndex: 3, fontSize: 10 },
     ]);
-    const md = emitMarkdown(items, mkDefaultPages(items))!;
+    const md = emit(items)!;
     expect(md).toContain("- Shipped v2 of payments API");
   });
 
@@ -250,7 +253,7 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
       { text: "second line", lineIndex: 1, page: 1 },
       { text: "third line on page 2", lineIndex: 0, page: 2 },
     ]);
-    const md = emitMarkdown(items, mkDefaultPages(items))!;
+    const md = emit(items)!;
     const lines = md.split("\n");
     // "first line" \n "second line" \n "" \n "third line on page 2"
     expect(lines).toContain("");
@@ -265,7 +268,7 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
       { text: "another line of body text here", lineIndex: 3, fontSize: 10, page: 1 },
       { text: "next page header", lineIndex: 0, fontSize: 14, page: 2 },
     ]);
-    const md = emitMarkdown(items, mkDefaultPages(items))!;
+    const md = emit(items)!;
     expect(md).not.toMatch(/\n{3,}/);
   });
 });

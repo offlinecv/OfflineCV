@@ -69,7 +69,7 @@ npm run build        # tsc -b && vite build → dist/
 npm run test         # vitest run
 npm run typecheck    # tsc -b --noEmit
 npm run lint         # eslint .
-npm run verify:quick # inner-loop gate: typecheck → lint → change-scoped tests
+npm run verify:quick # inner-loop gate: typecheck → lint → eager-graph gate → change-scoped tests
 npm run verify       # local pre-push gate: typecheck → lint → gates → tests → build → fallow
 ```
 

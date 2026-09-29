@@ -742,7 +742,7 @@ const INSTITUTION_NAME_HINTS =
 
 /** A sub-field NOTE line that rides under an entry — a GPA / Minor / Major /
  *  concentration / coursework annotation — rather than a new entry header. Used
- *  by the shared {@link isEntryHeaderShape} predicate (entry-blocks.ts) to reject
+ *  by the shared {@link isEntryHeaderShape} predicate (line-primitives.ts) to reject
  *  such a line as an entry-boundary lead: "GPA: 3.8", "Minor in Economics",
  *  "Relevant Coursework: …" are properties of the school/role above them, not a
  *  new title/program/institution. Anchored to the line start so a legitimate

@@ -25,7 +25,7 @@ import {
   normalizeDate,
   stripBullet,
 } from "../line-primitives.ts";
-import { isDateOnlyLine, isEntryHeaderShape } from "../entry-blocks.ts";
+import { isDateOnlyLine, isEntryHeaderShape } from "../line-primitives.ts";
 import {
   EDUCATION_SEGMENT_SPLIT_SRC,
   classifyGradeSegment,

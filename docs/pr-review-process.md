@@ -44,6 +44,7 @@ steps below, and knowing which one failed saves you a guess:
 | `npm run typecheck` | TypeScript does not compile |
 | `npm run lint` | ESLint — including the design-system and colour-token rules |
 | `npm run check:fixtures` | a committed résumé PDF carries real contact data |
+| `npm run check:eager` | an HTML entry statically imports an on-demand parser module (`line-assembly.ts`, `entry-blocks.ts`, …) — the output names the chain to cut |
 | `npm run check:baselines` | a known-failure exemption is charged to a closed issue |
 | `npm run check:core` | the publishable `@offlinecv/core` tarball is broken |
 | `npm run test:coverage` | a test fails |
