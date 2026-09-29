@@ -44,6 +44,7 @@ case "$*" in
   "pr list "*"--base "*)
     base=$(printf '%s\\n' "$@" | sed -n '/^--base$/{n;p;}')
     f="$FAKE_DIR/list-$(tr / _ <<<"$base").json" ;;
+  "pr view "*"--json number,"*) f="$FAKE_DIR/view-$3.json" ;;
   "pr view "*"--json mergeable"*)
     q="$FAKE_DIR/mergeable-$3"
     first=$(head -1 "$q"); rest=$(tail -n +2 "$q")
@@ -500,10 +501,11 @@ describe("resolve", () => {
 // ---- select: which PRs an event touches --------------------------------------
 
 describe("select", () => {
-  const list = (base, prs) =>
-    writeFileSync(join(fake, `list-${base}.json`), JSON.stringify(prs.map(([number, login, isDraft = false]) => ({
-      number, author: { login }, isDraft, isCrossRepository: false,
-    }))));
+  const pr = ([number, login, isDraft = false, labels = []]) => ({
+    number, author: { login }, isDraft, isCrossRepository: false, labels: labels.map((name) => ({ name })),
+  });
+  const list = (base, prs) => writeFileSync(join(fake, `list-${base}.json`), JSON.stringify(prs.map(pr)));
+  const view = (row) => writeFileSync(join(fake, `view-${row[0]}.json`), JSON.stringify(pr(row)));
   const mergeable = (n, ...states) => writeFileSync(join(fake, `mergeable-${n}`), states.join("\n") + "\n");
   const select = (extra) => JSON.parse(run(dir, ["select"], { MERGEABLE_POLL_SECONDS: "0", ...extra }));
 
@@ -521,6 +523,33 @@ describe("select", () => {
   it("on a PR push or merge: every Gaal PR stacked on its branch", () => {
     list("gaal_issue-5", [[21, "app/gaal-agent"], [22, "someone"]]);
     expect(select({ EVENT: "pull_request_target", HEAD_REF: "gaal/issue-5" })).toEqual([{ pr: 21, agent: true }]);
+  });
+
+  it("on a PR opened already conflicting (#1104): that PR, with no base move needed", () => {
+    view([31, "app/gaal-agent"]);
+    mergeable(31, "UNKNOWN", "CONFLICTING");
+    expect(select({ EVENT: "pull_request_target", ACTION: "opened", PR_NUMBER: "31" })).toEqual([{ pr: 31, agent: true }]);
+  });
+
+  it("on a PR opened merely behind, or by a human: nothing", () => {
+    view([32, "app/gaal-agent"]);
+    mergeable(32, "MERGEABLE");
+    expect(select({ EVENT: "pull_request_target", ACTION: "reopened", PR_NUMBER: "32" })).toEqual([]);
+    view([33, "someone"]);
+    expect(select({ EVENT: "pull_request_target", ACTION: "opened", PR_NUMBER: "33" })).toEqual([]);
+  });
+
+  it("on the hourly sweep: conflicting Gaal PRs, minus those already handed to a human", () => {
+    list("main", [[40, "app/gaal-agent", false, ["needs-human"]], [41, "app/gaal-agent", false, ["bug"]], [42, "app/gaal-agent"]]);
+    mergeable(41, "CONFLICTING");
+    mergeable(42, "MERGEABLE");
+    expect(select({ EVENT: "schedule", DEFAULT_BRANCH: "main" })).toEqual([{ pr: 41, agent: true }]);
+  });
+
+  it("on a push, a PR handed to a human is still retried: its base moved", () => {
+    list("main", [[40, "app/gaal-agent", false, ["needs-human"]]]);
+    mergeable(40, "CONFLICTING");
+    expect(select({ EVENT: "push", DEFAULT_BRANCH: "main" })).toEqual([{ pr: 40, agent: true }]);
   });
 
   it("with nothing to do: an empty list", () => {
