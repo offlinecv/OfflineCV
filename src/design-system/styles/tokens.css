@@ -21,6 +21,7 @@
   color-scheme: light dark;
 
   --color-bg-base: #f8fafc;
+  --color-bg-paper: #ffffff;
   --color-bg-card: #ffffff;
   --color-bg-card-warm: #f1f5f9;
   --color-bg-subtle: #f1f5f9;
@@ -57,6 +58,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --color-bg-base: #0f172a;
+    --color-bg-paper: #ffffff;
     --color-bg-card: #1e293b;
     --color-bg-card-warm: #1e293b;
     --color-bg-subtle: #334155;

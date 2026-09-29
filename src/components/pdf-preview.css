@@ -1,0 +1,43 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The offlinecv Authors */
+
+/**
+ * pdf-preview.css — minimal scoped text-layer styling for PdfPreview (#1077).
+ *
+ * Provides positioning, transparency, and selection rules required by pdfjs's
+ * TextLayer so text runs align over the canvas and support user selection.
+ */
+
+.pdf-preview-page {
+  position: relative;
+  isolation: isolate;
+}
+
+.pdf-preview-page .textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: transparent;
+  z-index: 2;
+  user-select: text;
+}
+
+.pdf-preview-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdf-preview-page .textLayer ::selection {
+  background: var(--color-accent-primary);
+  opacity: 0.25;
+  color: transparent;
+}

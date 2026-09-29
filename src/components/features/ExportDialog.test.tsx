@@ -31,9 +31,15 @@ import type { RenderFinding } from "../../lib/pdf/render-findings.ts";
   true;
 
 const pdfDownload = vi.fn();
+const pdfRender = vi.fn(() => Promise.resolve());
 const markdownDownload = vi.fn();
 const reportDownload = vi.fn(() => Promise.resolve(true));
 let pdfError: string | null = null;
+let pdfPreview: { bytes: Uint8Array; pages: number } | null = {
+  bytes: new Uint8Array([1, 2, 3]),
+  pages: 1,
+};
+let isRendering = false;
 /** #621 export findings the PDF row surfaces — empty for a clean export, which
  *  is what every case here renders unless it says otherwise. */
 let pdfFindings: RenderFinding[] = [];
@@ -43,6 +49,14 @@ let pdfFindings: RenderFinding[] = [];
  *  what these capture — is that all three were given one. */
 const captured: Record<string, (() => void) | undefined> = {};
 
+vi.mock("../PdfPreview.tsx", () => ({
+  PdfPreview: ({ bytes }: { bytes: Uint8Array }) => (
+    <div data-testid="mock-pdf-preview" data-bytes-length={bytes.length}>
+      Mock PDF Preview
+    </div>
+  ),
+}));
+
 vi.mock("../../hooks/useDownloadPdf.ts", () => ({
   useDownloadPdf: (
     _r: unknown,
@@ -51,7 +65,10 @@ vi.mock("../../hooks/useDownloadPdf.ts", () => ({
   ) => {
     captured.pdf = onDownloaded;
     return {
+      render: pdfRender,
       download: pdfDownload,
+      preview: pdfPreview,
+      isRendering,
       isGenerating: false,
       error: pdfError,
       findings: pdfFindings,
@@ -162,6 +179,7 @@ function text(el: HTMLElement): string {
 
 beforeEach(() => {
   pdfDownload.mockClear();
+  pdfRender.mockClear();
   markdownDownload.mockClear();
   reportDownload.mockClear();
   pdfError = null;
@@ -183,6 +201,21 @@ afterEach(() => {
 });
 
 describe("ExportDialog", () => {
+  it("requests a render when the dialog opens (#1077)", () => {
+    render(exportable());
+    expect(pdfRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the preview pane with accessible name and page count (#1077)", () => {
+    const el = render(exportable());
+    const previewAside = el.querySelector(
+      'aside[aria-label="Preview of the PDF you will download"]',
+    );
+    expect(previewAside).not.toBeNull();
+    expect(text(el)).toContain("Preview · 1 page");
+    expect(el.querySelector('[data-testid="mock-pdf-preview"]')).not.toBeNull();
+  });
+
   it("lists three artifacts and says what each one IS", () => {
     // #680 items 5 and 7: a row that only says "Download" leaves the user
     // guessing which résumé they get and whether it is the ATS-safe one.

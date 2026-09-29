@@ -39,7 +39,7 @@ export function SourcePdfPanel({ bytes, sourceKind }: SourcePdfPanelProps) {
   if (sourceKind === "pdf" && bytes != null) {
     return (
       <div className="max-h-[600px] overflow-y-auto">
-        <PdfPreview bytes={bytes} />
+        <PdfPreview bytes={bytes} maxPages={2} />
       </div>
     );
   }

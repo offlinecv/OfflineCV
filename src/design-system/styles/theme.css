@@ -32,6 +32,7 @@
   --text-4xs: 0.5625rem; /* 9px */
 
   /* Surface colors */
+  --color-surface-paper: var(--color-bg-paper);
   --color-surface-base: var(--color-bg-base);
   --color-surface-card: var(--color-bg-card);
   --color-surface-card-warm: var(--color-bg-card-warm);

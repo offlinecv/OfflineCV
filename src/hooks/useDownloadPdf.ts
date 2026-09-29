@@ -3,37 +3,28 @@
 
 /**
  * useDownloadPdf — drives the "Download PDF" action on the reconstructed-resume
- * surface (#171).
+ * surface (#171) and powers the export preview (#1077).
  *
- * Flow: build the flat ATS model from the surface's own props → check that the
- * export font can draw every character (#664) → render bytes with the pdf-lib
- * draw engine → wrap in a Blob → trigger a same-document download via a
- * temporary object URL.
+ * Flow:
+ *   - `render()`: builds the flat ATS model from surface props → checks font
+ *     support (#664 refusal) → renders PDF bytes with pdf-lib → caches the
+ *     preview `{ bytes, pages }`.
+ *   - `download()`: saves the cached bytes (or triggers an on-demand render if
+ *     not yet previewed) → wraps in a Blob → triggers same-document download.
  *
- * Zero-egress holds, but not because nothing is fetched: the renderer DOES issue
- * a `fetch` for the vendored Liberation Sans TTFs, and this docblock previously claimed
- * "no network request is made (no font fetch, no upload)", which was false. The
- * fetch targets the app's own bundled-asset origin — never a font CDN — so no
- * résumé bytes leave the browser, which is the actual guarantee. Say custody,
- * not runtime.
+ * Zero-egress holds: Liberation Sans font fetches target the app's own bundled
+ * origin, never a CDN. Data custody remains strictly client-side.
  *
- * It also carries the export's own findings (#621) — what the renderer could
- * not draw cleanly — back to the surface. Those are ADVISORY and arrive only
- * after the bytes have reached the user: the refusal below is the one thing that
- * stops a download, and reporting must never grow into a second one.
+ * Findings (#621): advisory reports on what could not be drawn cleanly.
+ * Populated post-download so findings describe the delivered file rather than
+ * acting as an unearned warning before the user downloads.
  *
- * This hook owns the refusal for #664. When the font fetch fails, the
- * renderer falls back to Helvetica, whose WinAnsi codec replaces anything
- * outside it with `?` — including a candidate's own name. Rather than hand back
- * a PDF reading `ANNA WI?NIEWSKA`, the hook probes first and refuses, because
- * the trigger is the network rather than the user's data and a retry usually
- * clears it. The refusal lives here and not in `renderAtsResumePdf` so that the
- * renderer's ~35 other call sites — every round-trip and export test, plus the
- * corpus oracle, which must keep rendering the degraded value to measure it —
- * are unaffected.
+ * Refusal for #664: if Liberation Sans is missing and fallback to Helvetica
+ * would mangle characters (e.g. Polish diacritics), the hook probes first and
+ * sets `error`, leaving `preview` null and refusing the download.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { buildAtsResumeModel } from "../lib/pdf/ats-resume-model.ts";
@@ -48,11 +39,15 @@ import { trackDownloadCompleted, type DownloadSource } from "../lib/analytics.ts
 import { clearBlankDraft } from "./useResumeAnalysis.ts";
 
 export interface UseDownloadPdf {
+  render: () => Promise<void>;
   download: () => Promise<void>;
+  /** Bytes of the last successful render for the CURRENT result/score; null while rendering or after an input change. */
+  preview: { bytes: Uint8Array; pages: number } | null;
+  isRendering: boolean;
   isGenerating: boolean;
   error: string | null;
   /**
-   * What the LAST completed render could not draw cleanly (#621) — empty until a
+   * What the LAST completed export could not draw cleanly (#621) — empty until a
    * download has run, and empty again the moment the next one starts, so the
    * surface can never show findings that belong to a résumé the user has since
    * edited. Advisory only: the download already happened.
@@ -89,6 +84,20 @@ export function glyphLossMessage(losses: readonly ExportGlyphLoss[]): string {
   );
 }
 
+function isMatchingRender(
+  cached: { result: CascadeResult; score: AnonymousAtsScore } | null,
+  currResult: CascadeResult,
+  currScore: AnonymousAtsScore,
+): boolean {
+  if (!cached) return false;
+  if (cached.result !== currResult) return false;
+  return (
+    cached.score === currScore ||
+    (cached.score.overall === currScore.overall &&
+      cached.score.preLayoutOverall === currScore.preLayoutOverall)
+  );
+}
+
 export function useDownloadPdf(
   result: CascadeResult,
   score: AnonymousAtsScore,
@@ -98,11 +107,100 @@ export function useDownloadPdf(
    *  render failure must not earn the mark. */
   onDownloaded?: () => void,
 ): UseDownloadPdf {
+  const [preview, setPreview] = useState<{ bytes: Uint8Array; pages: number } | null>(null);
+  const [isRendering, setIsRendering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [findings, setFindings] = useState<RenderFinding[]>([]);
 
+  const lastRenderRef = useRef<{
+    result: CascadeResult;
+    score: AnonymousAtsScore;
+    bytes: Uint8Array;
+    pages: number;
+    findings: RenderFinding[];
+  } | null>(null);
+
+  const prevResultRef = useRef(result);
+  const prevScoreOverallRef = useRef(score.overall);
+  const prevScorePreLayoutRef = useRef(score.preLayoutOverall);
+
+  // Bumped on unmount and on every input change, so an in-flight render's
+  // completion can tell whether it is still the one that should be allowed to
+  // touch state — an older render finishing after a newer one (or after
+  // unmount) must not overwrite the current preview/error/isRendering (#1091
+  // review: stale-completion race + unmount crash).
+  const renderSeqRef = useRef(0);
+
+  // Invalidate cached preview whenever result or score changes (#1077).
+  useEffect(() => {
+    if (
+      prevResultRef.current !== result ||
+      prevScoreOverallRef.current !== score.overall ||
+      prevScorePreLayoutRef.current !== score.preLayoutOverall
+    ) {
+      prevResultRef.current = result;
+      prevScoreOverallRef.current = score.overall;
+      prevScorePreLayoutRef.current = score.preLayoutOverall;
+      renderSeqRef.current++;
+      setPreview(null);
+      lastRenderRef.current = null;
+    }
+  }, [result, score.overall, score.preLayoutOverall]);
+
+  useEffect(() => {
+    return () => {
+      renderSeqRef.current++;
+    };
+  }, []);
+
+  const render = useCallback(async () => {
+    if (isMatchingRender(lastRenderRef.current, result, score)) {
+      return;
+    }
+
+    const seq = ++renderSeqRef.current;
+    setIsRendering(true);
+    setError(null);
+    try {
+      const model = buildAtsResumeModel(result, score);
+      const losses = await findExportGlyphLosses(model);
+      if (seq !== renderSeqRef.current) return;
+      if (losses.length > 0) {
+        setError(glyphLossMessage(losses));
+        setPreview(null);
+        lastRenderRef.current = null;
+        return;
+      }
+
+      const rendered = await renderAtsResumePdf(model);
+      if (seq !== renderSeqRef.current) return;
+      lastRenderRef.current = {
+        result,
+        score,
+        bytes: rendered.bytes,
+        pages: rendered.pages,
+        findings: rendered.findings,
+      };
+      setPreview({ bytes: rendered.bytes, pages: rendered.pages });
+    } catch (err) {
+      if (seq !== renderSeqRef.current) return;
+      setError(err instanceof Error ? err.message : "Could not generate PDF.");
+      setPreview(null);
+      lastRenderRef.current = null;
+    } finally {
+      if (seq === renderSeqRef.current) setIsRendering(false);
+    }
+  }, [result, score]);
+
   const download = useCallback(async () => {
+    // Not bumped: a download must not cancel an in-flight render. Only read,
+    // so an input change (or unmount) mid-export keeps this completion from
+    // writing the previous résumé's bytes into the current preview. The file
+    // itself and its analytics still land — they belong to the click that
+    // started them (#1091 review).
+    const seq = renderSeqRef.current;
+    const isCurrent = () => seq === renderSeqRef.current;
     setIsGenerating(true);
     setError(null);
     // Cleared up front, alongside `error`, for the same reason: a stale report
@@ -110,19 +208,40 @@ export function useDownloadPdf(
     setFindings([]);
     try {
       const model = buildAtsResumeModel(result, score);
+      let bytes: Uint8Array;
+      let renderedFindings: RenderFinding[];
 
-      // #664: refuse rather than silently substituting "?" in the user's own
-      // fields. Returns [] whenever the embedded font loaded OR nothing would
-      // actually be lost, so a pure-ASCII résumé downloads exactly as before
-      // even when the font fetch fails. Returning early skips the download and
-      // the analytics event; `finally` still clears `isGenerating`.
-      const losses = await findExportGlyphLosses(model);
-      if (losses.length > 0) {
-        setError(glyphLossMessage(losses));
-        return;
+      if (isMatchingRender(lastRenderRef.current, result, score)) {
+        bytes = lastRenderRef.current!.bytes;
+        renderedFindings = lastRenderRef.current!.findings;
+      } else {
+        // #664: refuse rather than silently substituting "?" in the user's own
+        // fields.
+        const losses = await findExportGlyphLosses(model);
+        if (losses.length > 0) {
+          if (isCurrent()) {
+            setError(glyphLossMessage(losses));
+            setPreview(null);
+            lastRenderRef.current = null;
+          }
+          return;
+        }
+
+        const rendered = await renderAtsResumePdf(model);
+        bytes = rendered.bytes;
+        renderedFindings = rendered.findings;
+        if (isCurrent()) {
+          lastRenderRef.current = {
+            result,
+            score,
+            bytes: rendered.bytes,
+            pages: rendered.pages,
+            findings: rendered.findings,
+          };
+          setPreview({ bytes: rendered.bytes, pages: rendered.pages });
+        }
       }
 
-      const { bytes, findings: rendered } = await renderAtsResumePdf(model);
       // `bytes.slice()` copies into a fresh ArrayBuffer-backed view so Blob gets
       // a clean buffer.
       triggerBlobDownload(
@@ -132,7 +251,7 @@ export function useDownloadPdf(
       );
       // AFTER the download, never before: a finding is a report on the file the
       // user now has, not a gate in front of it (#621).
-      setFindings(rendered);
+      if (isCurrent()) setFindings(renderedFindings);
 
       // Distinguish a from-scratch authored download from an uploaded one
       // (#313). `tiers` is empty ONLY for `buildBlankResult()`'s output —
@@ -147,15 +266,13 @@ export function useDownloadPdf(
       // draft-clearing triggers (#313) — the user has what they came for.
       if (source === "blank") clearBlankDraft();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate PDF.");
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : "Could not generate PDF.");
+      }
     } finally {
       setIsGenerating(false);
     }
-    // `onDownloaded` joins the deps rather than riding a ref: `download` is
-    // called from a click, never watched by an effect, so a re-minted identity
-    // costs nothing — and omitting it would run last render's callback, which
-    // is keyed to the résumé that was on screen then.
   }, [result, score, onDownloaded]);
 
-  return { download, isGenerating, error, findings };
+  return { render, download, preview, isRendering, isGenerating, error, findings };
 }
