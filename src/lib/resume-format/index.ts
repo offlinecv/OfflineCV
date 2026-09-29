@@ -24,6 +24,8 @@ export {
   MIDDOT_SPLIT_RE,
   HEADER_DATE_GAP,
   HEADER_WRAP_INDENT,
+  CREDENTIAL_LIST_SEPARATOR,
+  CREDENTIAL_SPLIT_RE,
 } from "./separators.ts";
 
 export { composeRoleHeader, splitRoleHeader } from "./role-header.ts";

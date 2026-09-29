@@ -22,9 +22,11 @@ import {
   COUNTRY_GAZETTEER,
   DATE_RANGE_RE,
   INTL_LOCATION_RE,
+  MONTH,
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   OPEN_ENDED_ALT,
+  PROGRAM_NOTE_RE,
   SEASON,
   STRICT_MONTH_YEAR_RE,
   US_LOCATION_RE,
@@ -96,6 +98,77 @@ export function isProseLine(text: string): boolean {
   if (!/[a-z]/.test(trimmed)) return false;
   if (!SENTENCE_BREAK_RE.test(trimmed)) return false;
   return trimmed.split(/\s+/).filter(Boolean).length >= PROSE_MIN_WORDS;
+}
+
+// ── Shared entry-header shape recognition ───────────────────────────────────
+//
+// The anchor-on-shape family (#238 education, #239 experience; cf #31, #145):
+// a valid entry is missed when it lacks the field the section anchors on — a
+// degree keyword for education, a date range for experience. The fix is to
+// recognize an entry by the SHAPE of its header line rather than requiring that
+// one field. `isEntryHeaderShape` is that shared, field-agnostic shape test:
+// "does this line read like the LEAD of an entry (a role title, an org/program
+// name, an institution) — as opposed to body prose, a bare date, or a sub-field
+// note?" Geometry signals (indent past the bullet margin, a dangling wrapped
+// tail) stay in the callers, which own the layout; this predicate is pure text
+// shape so education (no geometry) and experience (full geometry) share it.
+//
+// Lives here (#1106) rather than in `entry-blocks.ts` because the PDF exporter
+// (`ats-resume-model.ts`) needs `isEntryHeaderShape` too, and `entry-blocks.ts`
+// pulls in `line-assembly.ts` — off the eager entry-chunk graph on purpose
+// (#650). `line-primitives.ts` is already reached from the exporter via
+// `isLoneDateRange`, so importing these two predicates from here adds no new
+// edge to the build's static closure.
+
+/** True when the whole trimmed line is essentially JUST a date / date-range — a
+ *  bare year, a month-year, or a season/graduation-qualified range — so it must
+ *  not be mistaken for an entry header or an institution. Strips date tokens and
+ *  connective/season/graduation words; an empty remainder means the line carried
+ *  nothing but a date. Shared by education chunking and {@link isEntryHeaderShape}. */
+export function isDateOnlyLine(text: string): boolean {
+  const stripped = text
+    .replace(new RegExp(String.raw`\b${MONTH}\.?`, "gi"), "")
+    .replace(new RegExp(String.raw`\b${SEASON}\b`, "gi"), "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/\b(?:present|current|expected|graduation|graduated|anticipated)\b/gi, "")
+    .replace(/[\s,–\-—|/().:]+/g, "")
+    .trim();
+  return stripped.length === 0;
+}
+
+/**
+ * True when `text` reads like the HEADER LEAD of a resume entry — a role title,
+ * an organization, a program/certificate name, or an institution — rather than
+ * description prose, a bare date line, or a sub-field note (GPA / Minor / etc.).
+ *
+ * This is the shared "entry-boundary shape" predicate behind the anchor-on-shape
+ * fixes: education recognizes a degree-keyword-less program entry by it (#238),
+ * and experience recognizes a dateless role header by it (#239). It is
+ * intentionally TEXT-ONLY — it makes no use of x/y geometry — so a section with
+ * no layout data (education chunking runs on flattened strings) and one with full
+ * geometry (experience) can both rely on it; each caller layers its own geometry
+ * guards (wrapped-tail indent, dangling-connective predecessor) on top.
+ *
+ * A line qualifies when ALL hold:
+ *   - it carries substantive text (non-empty after trim), and
+ *   - it LEADS WITH A CAPITAL OR DIGIT — a proper-noun / numbered entry lead, not
+ *     a lowercase-led sentence fragment (a wrapped bullet tail), and
+ *   - it does NOT read as a date-only line ({@link isDateOnlyLine}) — a bare
+ *     graduation year / attendance range is the date OF an entry, not a new one, and
+ *   - it does NOT read as prose ({@link isProseLine}) — a mid-thought description
+ *     sentence, and
+ *   - it is NOT a sub-field note ({@link PROGRAM_NOTE_RE}) — "GPA: 3.8",
+ *     "Minor in Economics", "Relevant Coursework: …" are properties of the entry
+ *     above, not a new entry head.
+ */
+export function isEntryHeaderShape(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (!/^[A-Z0-9]/.test(t)) return false;
+  if (isDateOnlyLine(t)) return false;
+  if (isProseLine(t)) return false;
+  if (PROGRAM_NOTE_RE.test(t)) return false;
+  return true;
 }
 
 /**

@@ -63,6 +63,40 @@ export const ORG_COMMA = ", ";
  *  unify — the constant exists so the one compose site is named, not silent. */
 export const HEADER_DATE_GAP = "  ";
 
+/**
+ * The separator that joins several credentials onto ONE compact certifications
+ * line (#899). It is deliberately the same `" · "` every other multi-value line
+ * in the reconstructed PDF uses (the skills list, `Company · Location`) — since
+ * #649 that is enforced rather than asserted: the bytes are {@link MIDDOT_JOIN}
+ * itself, and this name is the credentials-domain alias. The exporter imports
+ * THIS constant rather than spelling it a second time —
+ * `ats-resume-model.ts` builds `AtsSection.compactLine` with it and the renderer
+ * wraps that line on it ATOMICALLY (`MIDDOT_SEGMENT_SEP`, `wrapSegmentsToLines`).
+ *
+ * Atomic wrapping is what makes the compact line round-trip at all: the wrap
+ * point can only fall BETWEEN credentials, so every extracted `PdfLine` of the
+ * block starts at a credential boundary and `parseFlatAwardList`
+ * (`heuristics/extract/achievements.ts`) can split each line back into whole
+ * credentials without any flow-joining. The
+ * parse → export → re-parse hop over `google-docs-skia-proxy-certifications.pdf`
+ * (`corpus-roundtrip.test.ts`) is what pins the two ends to the same glyph.
+ *
+ * Defined here rather than in `heuristics/extract/achievements.ts` (#1106): the
+ * exporter used to reach through that extractor — which drags in
+ * `entry-blocks.ts` and `line-assembly.ts` — for two bytes this contract module
+ * already owns. `achievements.ts` re-imports both names from here, unchanged for
+ * its own callers.
+ */
+export const CREDENTIAL_LIST_SEPARATOR = MIDDOT_JOIN;
+
+/**
+ * The boundary {@link CREDENTIAL_LIST_SEPARATOR} draws, as the re-parser sees
+ * it. Whitespace is REQUIRED on both sides, so a middot glued inside a token is
+ * not a boundary, and `\s` (which covers the NBSP / thin spaces a PDF extractor
+ * emits, not just U+0020) absorbs whatever spacing the extraction hands back.
+ */
+export const CREDENTIAL_SPLIT_RE = MIDDOT_SPLIT_RE;
+
 /** Hanging indent (pt) for a wrapped experience-header tail (#436). Matches the
  *  renderer's bullet text indent so the tail sits just PAST the bullet-marker
  *  margin — the threshold `isWrappedContinuation` (`entry-blocks.ts`) uses to

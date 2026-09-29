@@ -21,11 +21,12 @@ import {
 } from "../regex.ts";
 import {
   isBulletLine,
+  isDateOnlyLine,
+  isEntryHeaderShape,
   parseDateRange,
   normalizeDate,
   stripBullet,
 } from "../line-primitives.ts";
-import { isDateOnlyLine, isEntryHeaderShape } from "../entry-blocks.ts";
 import {
   EDUCATION_SEGMENT_SPLIT_SRC,
   classifyGradeSegment,

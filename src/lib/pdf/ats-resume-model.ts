@@ -54,13 +54,8 @@ import {
   joinAchievementType,
   DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR,
 } from "../score/entry-dates.ts";
-import { isLoneDateRange } from "../heuristics/line-primitives.ts";
-import { isEntryHeaderShape } from "../heuristics/entry-blocks.ts";
+import { isEntryHeaderShape, isLoneDateRange } from "../heuristics/line-primitives.ts";
 import { formatGradeNote } from "../heuristics/extract/education-grade.ts";
-import {
-  CREDENTIAL_LIST_SEPARATOR,
-  CREDENTIAL_SPLIT_RE,
-} from "../heuristics/extract/achievements.ts";
 import {
   buildEducationDates,
   educationDateAnchors,
@@ -72,6 +67,8 @@ import { buildContactFields, formatLinkDisplay } from "../contact.ts";
 import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
 import {
   composeRoleHeader,
+  CREDENTIAL_LIST_SEPARATOR,
+  CREDENTIAL_SPLIT_RE,
   HEADER_DATE_GAP,
   HEADER_WRAP_INDENT,
   MIDDOT_JOIN,

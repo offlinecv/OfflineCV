@@ -333,6 +333,7 @@ export default defineConfig({
       // tested gate here and fallow merely scores it 0% and complains, loudly.
       include: [
         "src/**/*.{ts,tsx}",
+        "scripts/check-eager-graph.mjs",
         "scripts/check-fixture-pii.mjs",
         "scripts/check-known-failures.mjs",
         "scripts/select-tests.mjs",
