@@ -28,8 +28,9 @@
 #
 # Subcommands (REPO=owner/name and GH_TOKEN in the environment):
 #   select             pr-auto-rebase.yml: which PRs to replay for this event.
-#                      Env EVENT, DEFAULT_BRANCH, and HEAD_REF (the pushed or
-#                      merged PR's branch). Prints a JSON array.
+#                      Env EVENT, DEFAULT_BRANCH, ACTION, and HEAD_REF (the
+#                      pushed or merged PR's branch) or PR_NUMBER (the opened
+#                      PR). Prints a JSON array.
 #   resolve <pr>       The PR's state, its replay target and the commits known
 #                      to be base rather than the PR's own. Prints JSON.
 #   apply <json>       Fetch, check, and replay onto origin/<target>, leaving the
@@ -294,17 +295,34 @@ cmd_note() {
 #   a PR pushed or merged (HEAD_REF) → open Gaal PRs stacked on its branch. They
 #     are replayed even without a conflict, or their diff keeps showing the
 #     parent's superseded change.
+#   a PR opened or reopened (PR_NUMBER) → that PR, if it already CONFLICTS.
+#   schedule → as a push, minus PRs labelled needs-human: the backstop for
+#     anything the events above missed.
 # Oldest first, so the agent budget (AGENT_CAP) goes to the longest-waiting.
 cmd_select() {
-  local cap=${AGENT_CAP:-3} list n state
+  local cap=${AGENT_CAP:-3} list n state conflicting_only=true
+  local fields=number,author,isDraft,isCrossRepository,labels
   case "${EVENT:?}" in
-    push)
-      list=$(gh pr list --repo "$REPO" --base "${DEFAULT_BRANCH:?}" --state open --limit 200 \
-        --json number,author,isDraft,isCrossRepository)
+    # The base moved (push), or nothing did and this is the backstop sweep for
+    # whatever an event missed (schedule). The sweep skips a PR already handed
+    # to a human: its base has not moved, so a retry would only repeat the
+    # verdict, and the agent run with it.
+    push|schedule)
+      list=$(gh pr list --repo "$REPO" --base "${DEFAULT_BRANCH:?}" --state open --limit 200 --json "$fields")
+      [ "$EVENT" = push ] ||
+        list=$(jq -c '[.[] | select([.labels[]?.name] | index("needs-human") | not)]' <<<"$list")
       ;;
     pull_request_target)
-      list=$(gh pr list --repo "$REPO" --base "${HEAD_REF:?}" --state open --limit 200 \
-        --json number,author,isDraft,isCrossRepository)
+      case "${ACTION:-}" in
+        # A PR can be born conflicting: built on a base that moved before it
+        # opened (#1104 opened three minutes after the sibling it overlapped merged). No later
+        # base move is coming to catch it, so check the PR itself.
+        opened|reopened)
+          list=$(gh pr view "${PR_NUMBER:?}" --repo "$REPO" --json "$fields" --jq '[.]') ;;
+        *)
+          list=$(gh pr list --repo "$REPO" --base "${HEAD_REF:?}" --state open --limit 200 --json "$fields")
+          conflicting_only=false ;;
+      esac
       ;;
     *) die "unknown event $EVENT" ;;
   esac
@@ -316,7 +334,7 @@ cmd_select() {
     candidates+=("$n")
   done
 
-  if [ "$EVENT" != push ]; then
+  if [ "$conflicting_only" = false ]; then
     picked=(${candidates[@]+"${candidates[@]}"})
   else
     # GitHub computes mergeability lazily after a push; asking starts it. Poll

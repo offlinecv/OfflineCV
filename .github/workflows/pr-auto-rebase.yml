@@ -12,8 +12,14 @@
 #                             without a conflict, or its diff keeps showing the
 #                             parent's superseded change. A merged parent's
 #                             children are retargeted to its base.
-#   - workflow_dispatch     → one PR, by number. Also how the two events above
-#                             reach the rebase: claude-code-action rejects `push`
+#   - a PR opened/reopened  → that PR, if it is born conflicting: built on a base
+#                             that moved before it opened, so no later base move
+#                             is coming to catch it (#1104).
+#   - schedule (hourly)     → the push sweep again, minus PRs already labelled
+#                             `needs-human`: the backstop for a missed event, a
+#                             lost dispatch, or mergeability GitHub never settled.
+#   - workflow_dispatch     → one PR, by number. Also how every event above
+#                             reaches the rebase: claude-code-action rejects `push`
 #                             ("Unsupported event type: push", the first live run),
 #                             so `select` dispatches one run per PR instead of
 #                             rebasing inline. One path, on an event it accepts.
@@ -46,7 +52,9 @@ on: # zizmor: ignore[dangerous-triggers]
   push:
     branches: [main]
   pull_request_target:
-    types: [synchronize, closed]
+    types: [opened, reopened, synchronize, closed]
+  schedule:
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       pr:
@@ -65,10 +73,11 @@ jobs:
   select:
     if: >
       vars.PR_AUTO_REBASE != 'false' && (
-        github.event_name == 'push' || (
+        github.event_name == 'push' || github.event_name == 'schedule' || (
           github.event_name == 'pull_request_target' &&
           github.event.pull_request.head.repo.full_name == github.repository &&
-          (github.event.action == 'synchronize' || github.event.pull_request.merged)))
+          (contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) ||
+           github.event.pull_request.merged)))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -78,7 +87,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          # A schedule payload has no `repository`; its ref IS the default branch.
+          ref: ${{ github.event.repository.default_branch || github.ref_name }}
           sparse-checkout: .github/scripts
           persist-credentials: false
 
@@ -88,8 +98,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || github.ref_name }}
+          ACTION: ${{ github.event.action }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR: ${{ inputs.pr }}
           AGENT_CAP: ${{ vars.PR_AUTO_REBASE_AGENT_CAP || '3' }}
           WORKFLOW: ${{ github.workflow_ref }}
