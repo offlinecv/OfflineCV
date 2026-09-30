@@ -4,11 +4,11 @@
 // @vitest-environment jsdom
 
 /**
- * Render coverage for SourceDiagnosticsPanel (#263) — the segmented control that
+ * Render coverage for SourceDiagnosticsPanel (#263) — the `<Tabs>` (#527) that
  * collapses the three evidence views (Original PDF / Plain text / Layout warnings) under
  * one primary tab. Drives the segment switch and asserts: the source segment is the default
  * and labelled by sourceKind (Original PDF / DOCX / Markdown), the Layout-flags count
- * badge reflects trigger count, switching toggles `aria-pressed`, and all three panels
+ * badge reflects trigger count, switching toggles `aria-selected`, and all three panels
  * stay mounted (hidden, not unmounted) so the PDF preview is never re-rasterized. Raw
  * createRoot, matching the sibling panel tests. sourceKind="docx" keeps pdfjs out of jsdom
  * (the no-preview fallback).
@@ -63,12 +63,12 @@ function render(sourceKind: SourceKind = "docx") {
   return container;
 }
 
-function segment(label: string): HTMLButtonElement {
-  const btn = Array.from(container.querySelectorAll("button")).find((b) =>
-    b.textContent?.startsWith(label),
-  );
-  if (btn == null) throw new Error(`segment button "${label}" not found`);
-  return btn as HTMLButtonElement;
+function segment(label: string): HTMLElement {
+  const tab = Array.from(
+    container.querySelectorAll<HTMLElement>('[role="tab"]'),
+  ).find((b) => b.textContent?.startsWith(label));
+  if (tab == null) throw new Error(`tab "${label}" not found`);
+  return tab;
 }
 
 afterEach(() => {
@@ -79,20 +79,20 @@ afterEach(() => {
 describe("SourceDiagnosticsPanel", () => {
   it("defaults to the source segment and labels it by sourceKind", () => {
     render("docx");
-    expect(segment("Original DOCX").getAttribute("aria-pressed")).toBe("true");
-    expect(segment("Plain text").getAttribute("aria-pressed")).toBe("false");
+    expect(segment("Original DOCX").getAttribute("aria-selected")).toBe("true");
+    expect(segment("Plain text").getAttribute("aria-selected")).toBe("false");
     // The docx no-preview fallback (PDF panel) is the visible body.
     expect(container.textContent).toContain("No source preview available for DOCX files");
   });
 
   it("labels the source segment 'Original PDF' for PDF sources", () => {
     render("pdf");
-    expect(segment("Original PDF").getAttribute("aria-pressed")).toBe("true");
+    expect(segment("Original PDF").getAttribute("aria-selected")).toBe("true");
   });
 
   it("labels the source segment 'Original Markdown' for markdown sources", () => {
     render("markdown");
-    expect(segment("Original Markdown").getAttribute("aria-pressed")).toBe("true");
+    expect(segment("Original Markdown").getAttribute("aria-selected")).toBe("true");
   });
 
   it("names what cannot be previewed, so the source label is not an empty promise", () => {
@@ -111,17 +111,28 @@ describe("SourceDiagnosticsPanel", () => {
     expect(segment("Layout warnings").textContent).toContain("2");
   });
 
-  it("switches segments via aria-pressed and reveals extracted text", () => {
+  it("switches segments via aria-selected and reveals extracted text", () => {
     render();
     act(() => {
       segment("Plain text").click();
     });
-    expect(segment("Plain text").getAttribute("aria-pressed")).toBe("true");
-    expect(segment("Original DOCX").getAttribute("aria-pressed")).toBe("false");
+    expect(segment("Plain text").getAttribute("aria-selected")).toBe("true");
+    expect(segment("Original DOCX").getAttribute("aria-selected")).toBe("false");
     // rawText body is shown (its wrapper is no longer hidden).
     const pre = container.querySelector("pre");
     expect(pre?.textContent).toContain("RAWTEXT_MARKER");
     expect(pre?.closest("[hidden]")).toBeNull();
+  });
+
+  it("moves between segments with ArrowRight (Tabs primitive wiring)", () => {
+    render();
+    act(() => {
+      segment("Original DOCX").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      );
+    });
+    expect(segment("Plain text").getAttribute("aria-selected")).toBe("true");
+    expect(segment("Original DOCX").getAttribute("aria-selected")).toBe("false");
   });
 
   it("keeps all three panels mounted (hidden, not unmounted) across switches", () => {

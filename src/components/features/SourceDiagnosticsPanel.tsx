@@ -8,27 +8,25 @@
  * names described the parser's internal stages, not what each view shows.
  *
  * Collapses the three former evidence tabs (Source PDF, Extracted text, Layout
- * flags) into one primary tab. A nested segmented control switches between the
- * three views — labelled "Original PDF" (derived from sourceKind: "Original DOCX"
- * / "Original Markdown"), "Plain text", "Layout warnings"; the panels themselves
- * are unchanged (SourcePdfPanel, ExtractedTextPanel, LayoutFlagsList) — this only
- * adds the one nesting level.
- *
- * The control is a peer toggle (segmented control), not a second <Tabs>: these
- * are peer views of the same source, visually subordinate to the primary tab
- * strip. It is built from the <Button> primitive (no raw <button>), active state
- * via semantic tokens.
+ * flags) into one primary tab. A nested `<Tabs>` (from `@design-system`)
+ * switches between the three views — labelled "Original PDF" (derived from
+ * sourceKind: "Original DOCX" / "Original Markdown"), "Plain text", "Layout
+ * warnings"; the panels themselves are unchanged (SourcePdfPanel,
+ * ExtractedTextPanel, LayoutFlagsList) — this only adds the one nesting level.
+ * (#527 replaced a hand-rolled `SegmentButton` + `role="group"` track that had
+ * drifted from the `Tab` primitive's hover styling and missed #516's
+ * selection/hover rework — see `Tabs.tsx` for the shared visual language.)
  *
  * Render-vs-hide: all three panels stay mounted and the inactive ones are
- * toggled off with the `hidden` attribute (mirroring the <Tabs> primitive's own
- * TabPanel). Keeping SourcePdfPanel mounted matters — PdfPreview re-runs the
- * pdfjs getDocument + canvas render on every mount, so a conditional render
- * would re-rasterize the PDF (and flash) each time the user returns to it.
+ * toggled off with the `hidden` attribute — `TabPanel` does this itself.
+ * Keeping SourcePdfPanel mounted matters — PdfPreview re-runs the pdfjs
+ * getDocument + canvas render on every mount, so a conditional render would
+ * re-rasterize the PDF (and flash) each time the user returns to it.
  */
 
 import { useState } from "react";
 import type { CascadeResult, LayoutTrigger } from "../../lib/heuristics/types.ts";
-import { Button, CountBadge } from "@design-system";
+import { Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { LayoutFlagsList } from "./LayoutFlagsList.tsx";
 import { SourcePdfPanel, ExtractedTextPanel } from "./EvidencePanel.tsx";
 
@@ -63,71 +61,27 @@ export function SourceDiagnosticsPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <div
-        role="group"
-        aria-label="How your resume was read — views"
-        className="inline-flex gap-1 self-start rounded-md border border-border-light bg-surface-subtle p-1"
-      >
-        <SegmentButton
-          isActive={segment === "pdf"}
-          onClick={() => setSegment("pdf")}
-        >
-          {sourceSegmentLabel(sourceKind)}
-        </SegmentButton>
-        <SegmentButton
-          isActive={segment === "extracted"}
-          onClick={() => setSegment("extracted")}
-        >
-          Plain text
-        </SegmentButton>
-        <SegmentButton
-          isActive={segment === "flags"}
-          onClick={() => setSegment("flags")}
-          count={triggerCount}
-        >
-          Layout warnings
-        </SegmentButton>
-      </div>
+      <Tabs id="source-diagnostics" value={segment} onValueChange={(next) => setSegment(next as Segment)}>
+        <TabList aria-label="How your resume was read — views">
+          <Tab id="pdf">{sourceSegmentLabel(sourceKind)}</Tab>
+          <Tab id="extracted">Plain text</Tab>
+          <Tab id="flags" count={triggerCount}>
+            Layout warnings
+          </Tab>
+        </TabList>
 
-      <div hidden={segment !== "pdf"}>
-        <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />
-      </div>
-      <div hidden={segment !== "extracted"}>
-        <ExtractedTextPanel result={result} />
-      </div>
-      <div hidden={segment !== "flags"}>
-        <LayoutFlagsList
-          triggers={result.triggers as readonly LayoutTrigger[]}
-        />
-      </div>
+        <TabPanel id="pdf">
+          <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />
+        </TabPanel>
+        <TabPanel id="extracted">
+          <ExtractedTextPanel result={result} />
+        </TabPanel>
+        <TabPanel id="flags">
+          <LayoutFlagsList
+            triggers={result.triggers as readonly LayoutTrigger[]}
+          />
+        </TabPanel>
+      </Tabs>
     </div>
-  );
-}
-
-function SegmentButton({
-  isActive,
-  onClick,
-  count,
-  children,
-}: {
-  isActive: boolean;
-  onClick: () => void;
-  count?: number;
-  children: React.ReactNode;
-}) {
-  const activeCls = isActive
-    ? "bg-surface-card text-content-primary font-semibold shadow-xs"
-    : "text-content-secondary font-medium hover:text-content-primary hover:bg-transparent";
-
-  return (
-    <Button
-      variant="ghost"
-      aria-pressed={isActive}
-      onClick={onClick}
-      className={`rounded px-3 py-1 text-sm ${activeCls}`}
-    >
-      {children}
-      <CountBadge count={count} />
-    </Button>
   );
 }

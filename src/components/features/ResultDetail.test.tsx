@@ -225,8 +225,15 @@ describe("ResultDetail", () => {
     // here would be a second door onto the corridor the rail's Match-jobs stage
     // already opens, running the identical `departToJobsAndNavigate`.
     const el = render({ isAvailable: true }, "Senior engineer.");
-    expect(el.querySelectorAll('[role="tab"]')).toHaveLength(0);
-    expect(el.querySelectorAll('[role="tablist"]')).toHaveLength(0);
+    // The evidence view inside the collapsed disclosure legitimately owns a
+    // <Tabs> now (#527, PDF / Plain text / Layout warnings) — this guard is
+    // about a SEPARATE rail for site navigation, so assert on the tablist's
+    // label rather than the mere presence of role="tab".
+    for (const list of el.querySelectorAll('[role="tablist"]')) {
+      expect(list.getAttribute("aria-label")).toBe(
+        "How your resume was read — views",
+      );
+    }
     expect(el.textContent).not.toContain("Find jobs");
     expect(el.textContent).not.toContain("Open job workbench");
   });
@@ -262,7 +269,9 @@ describe("ResultDetail", () => {
     // presence: a remount would produce a different element for the same panel.
     const el = render({ isAvailable: false });
     const details = disclosure(el, "How your resume was read");
-    const before = details.querySelector('[role="group"]');
+    // The evidence view's segmented control is a <Tabs> (#527), so its
+    // persistent wrapper is now the tablist, not a hand-rolled role="group".
+    const before = details.querySelector('[role="tablist"]');
     expect(before).not.toBeNull();
 
     // Driven through the summary, not by assigning `details.open`: the
@@ -276,7 +285,7 @@ describe("ResultDetail", () => {
     act(() => summary.click());
     expect(details.open).toBe(false);
 
-    expect(details.querySelector('[role="group"]')).toBe(before);
+    expect(details.querySelector('[role="tablist"]')).toBe(before);
   });
 
   // Three blocks lived here and moved to `src/components/Result.test.tsx` with
