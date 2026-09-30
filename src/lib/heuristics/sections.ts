@@ -957,26 +957,30 @@ const HEADERLESS_ROLE_CLUSTER_MIN = 2;
  * in the head, "Marathon Running Club, Boston, MA" reads as a master's degree
  * and every Massachusetts / Maryland / Mississippi / Maine role header is
  * rejected out of hand. A real education entry LEADS with its degree, so the
- * anchor costs nothing and closes the whole class. The institution half is
- * NOT anchored, and that half does have a cost: `University` / `College` /
- * `Institute` / `School` / `Academy` / `Polytechnic` are all real EMPLOYERS
- * too, so "Research Engineer, Stanford University (Sep 2018 - Jun 2021)" is
- * rejected as a degree line. A whole headerless cluster of such roles recovers
- * ZERO of them. The trade is deliberate and one-directional: this predicate is
- * the only thing standing between a headerless bucket and a section relabel,
- * it has no header to check itself against, and a degree list read as
- * employment is worse than a school-employed role left where it was — so it
- * fails CLOSED. Anchoring the institution half the way the degree half is
- * anchored (a real education entry leads with its DEGREE, not its school) is a
- * plausible follow-up, but it widens what the rule will relabel and so needs
- * its own repro and corpus measurement rather than riding this guard.
+ * anchor costs nothing and closes the whole class.
  *
- * The residue the anchor leaves is a title that LEADS with one of `DEGREE_RE`'s
- * full words ("Associate Product Manager", "Master Data Engineer"): that line is
- * rejected. It costs a role only when it is the FIRST of the cluster, since the
- * others still match and the split simply starts at one of them — and erring
- * toward leaving content where it was is the correct direction for a rule with
- * no header to check itself against.
+ * The institution half is anchored the same way, as of this rule: it rejects
+ * only when an `INSTITUTION_HINTS` token sits in the LEAD SEGMENT of the
+ * head — everything before the first comma, mirroring `DEGREE_RE`'s index-0
+ * anchor. Before this anchor, `University` / `College` / `Institute` /
+ * `School` / `Academy` / `Polytechnic` were tested un-anchored over the whole
+ * head, and all six are real EMPLOYERS too, so "Research Engineer, Stanford
+ * University (Sep 2018 - Jun 2021)" and "Content Lead, Khan Academy (Jul 2021
+ * - Present)" both read as degree lines and a whole headerless cluster of
+ * such roles recovered ZERO of them. A real education entry LEADS with either
+ * its degree or its school, so an institution hint in the role-title lead
+ * segment never happens for a genuine employer — the institution name comes
+ * AFTER the title, past the first comma. The residue this anchor leaves: an
+ * institution-first line with no degree in the lead ("Stanford University,
+ * Guest Lecturer (2019 - 2020)") still reads as education and is rejected,
+ * same as before the anchor — erring toward leaving content where it was is
+ * the correct direction for a rule with no header to check itself against.
+ *
+ * The residue the degree anchor leaves is a title that LEADS with one of
+ * `DEGREE_RE`'s full words ("Associate Product Manager", "Master Data
+ * Engineer"): that line is rejected. It costs a role only when it is the
+ * FIRST of the cluster, since the others still match and the split simply
+ * starts at one of them.
  *
  * The head is taken BEFORE the date rather than testing the whole line because
  * a role header may carry its scope sentence glued on after the date range
@@ -995,7 +999,8 @@ function looksLikeHeaderlessRoleHeader(line: PdfLine): boolean {
   const head = text.slice(0, match.index).trim();
   if (!/^\p{Lu}/u.test(head)) return false;
   if (!isEntryHeaderShape(head)) return false;
-  if (INSTITUTION_HINTS.test(head)) return false;
+  const leadSegment = head.split(",", 1)[0];
+  if (INSTITUTION_HINTS.test(leadSegment)) return false;
   const degree = DEGREE_RE.exec(head);
   return degree === null || degree.index !== 0;
 }

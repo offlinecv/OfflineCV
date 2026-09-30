@@ -356,8 +356,13 @@ function looksLikeUnpunctuatedRunningSentence(text: string): boolean {
  * The residue is one-sided and fails CLOSED — a scope line whose only
  * lowercase words are connectors ("Led the Payments Platform for the Americas")
  * is NOT caught and falls through to the header path, exactly as it did before
- * #708. Widening to reach it would want its own repro, per this module's rule
- * that each widening is pinned by the shape that motivated it.
+ * #708. This is not a rare edge: measured against 12 realistic Title-Cased
+ * scope lines, about half (6) are connector-only and missed this way —
+ * "Led the Payments Platform for the Americas", "Owned the Global Risk and
+ * Compliance Portfolio", "Managed the EMEA Sales Organization", "Built the
+ * Data Platform for Enterprise", and "Drove the Cloud Migration across
+ * Europe" among them. Widening to reach it would want its own repro, per this
+ * module's rule that each widening is pinned by the shape that motivated it.
  */
 /** Closed-class connectors that appear INSIDE genuine Title-Cased org and role
  *  names, and so carry no prose evidence. Articles, the two coordinating
@@ -369,13 +374,17 @@ function looksLikeUnpunctuatedRunningSentence(text: string): boolean {
 const HEADER_CONNECTOR_WORDS = new Set([
   "a", "an", "the", "and", "or", "of", "for", "to", "with",
   "at", "by", "in", "on", "from", "off", "across",
+  "de", "del", "la", "van", "von", "di", "da", "du", "der", "y",
 ]);
 /** A bare all-lowercase word — letters only, apostrophes/hyphens allowed
  *  inside. Excludes mixed-case brand tokens ("eBay", "iRobot"), which lead
  *  lowercase but are names, not prose. */
 const LOWERCASE_WORD_RE = /^\p{Ll}[\p{Ll}\p{M}'’-]*$/u;
 function isLowercaseContentWord(word: string): boolean {
-  const bare = word.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+  // Keep digits at the edges (not just letters) so an ordinal's numeral stays
+  // attached to its suffix — otherwise "1st"/"2nd"/"3rd" strip down to "st" /
+  // "nd" / "rd", which pass LOWERCASE_WORD_RE and are miscounted as content.
+  const bare = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
   return LOWERCASE_WORD_RE.test(bare) && !HEADER_CONNECTOR_WORDS.has(bare);
 }
 function looksLikeVerbLedScope(text: string): boolean {

@@ -1647,6 +1647,34 @@ describe("recoverHeaderlessExperience — opening on entry shape (#492)", () => 
     expect(names(sections)).not.toContain("experience");
   });
 
+  it("does not open on a headerless EDUCATION cluster written institution-first", () => {
+    // Same negative control, but the institution LEADS the head instead of
+    // the degree — guard 5 must reject both orderings, not just the
+    // degree-led one #843's anchor fix was measured against.
+    const sections = recover([
+      ...CONTACT,
+      { text: "Ridgemont State University, B.S. Computer Science (Aug 2012 - May 2016)", fontSize: 10 },
+      { text: "Lakeside College, B.A. Economics (Aug 2008 - May 2012)", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("opens on institution-named EMPLOYERS (#843) — the institution hint trails the role title", () => {
+    // Before the anchor fix, `INSTITUTION_HINTS` was tested un-anchored over
+    // the whole head, so "Stanford University" / "Khan Academy" in the
+    // EMPLOYER segment (after the comma) rejected these exactly like a
+    // headerless education entry, and the cluster never opened at all.
+    const sections = recover([
+      ...CONTACT,
+      { text: "Research Engineer, Stanford University, Palo Alto, CA (Sep 2018 - Jun 2021)", fontSize: 10 },
+      { text: "Content Lead, Khan Academy, Mountain View, CA (Jul 2021 - Present)", fontSize: 10 },
+    ]);
+    expect(names(sections)).toEqual(["profile", "experience"]);
+    expect(sectionContaining(sections, "Stanford University")?.name).toBe(
+      "experience",
+    );
+  });
+
   it("does not open when the router already found an experience section", () => {
     const sections = recover([
       ...CONTACT,

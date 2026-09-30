@@ -63,6 +63,12 @@ describe("looksLikeBelowAnchorProse — accepts body prose", () => {
     [
       "Worked on the migration of billing (payments, inventory, invoicing) systems for enterprise clients",
     ],
+    // #843 item 2 token battery — `budget,` and `e-commerce` are genuine
+    // lowercase content words and must still read as prose after the
+    // `\p{N}`-inclusive strip fix; every other rest word is Title-Cased or a
+    // closed connector so the battery token is the sole deciding word.
+    ["Managed the Acme budget,"],
+    ["Automated Logic e-commerce Division"],
   ])("%s", (line) => {
     expect(looksLikeBelowAnchorProse(line)).toBe(true);
   });
@@ -138,6 +144,33 @@ describe("looksLikeBelowAnchorProse — rejects real header lines", () => {
     // — company name included — false-positived as prose and was silently
     // dropped rather than kept as a header candidate.
     ["Doubleclick serving enterprise clients across the finance sector worldwide"],
+    // #843 item 1 — non-English nobiliary/locative particles are closed-class
+    // connectors too, same as "of"/"for"/"the". Before `HEADER_CONNECTOR_WORDS`
+    // grew them, "de" and "van" read as lowercase CONTENT words and these two
+    // verb-led company names false-positived as prose, dropping `company`.
+    ["Unified Communications de Mexico"],
+    ["Automated Logic van Nuys"],
+    // #843 item 2 — the word-strip must keep digits at the edges so an
+    // ordinal's numeral stays glued to its suffix. Before the fix, `1st` /
+    // `2nd` / `3rd` stripped down to `st` / `nd` / `rd`, which pass
+    // `LOWERCASE_WORD_RE` and were miscounted as lowercase content words.
+    ["Managed 1st Choice Health"],
+    ["Secured 2nd Round Financing"],
+    ["Managed 3rd Party Vendors"],
+    // Decision (#843): this is NOT required to read as prose — the ordinal
+    // strip fix only has to stop `1st`/`2nd`/`3rd` from being miscounted as
+    // content, not make every ordinal-led line a sentence.
+    ["Won 3rd Place Hackathon"],
+    // #843 item 2 token battery — non-content tokens the reviewer verified are
+    // unchanged by the digit-inclusive strip: `Inc.` and `O'Brien` fail on
+    // their leading uppercase letter regardless of the strip; `P&L,` and
+    // `(the` fail on an internal/connector token regardless; `24/7` fails on
+    // its leading digit both before and after the fix.
+    ["Managed Acme Inc."],
+    ["Managed Acme P&L,"],
+    ["Managed Acme (the"],
+    ["Managed Acme 24/7 Operations"],
+    ["Managed O'Brien Logistics"],
   ])("%s", (line) => {
     expect(looksLikeBelowAnchorProse(line)).toBe(false);
   });
