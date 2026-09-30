@@ -817,6 +817,78 @@ describe("computeAnonymousAtsScore", () => {
     });
   });
 
+  describe("marker-only line does not pool (#678)", () => {
+    // "4." normalizes to "" (a bare numbered marker IS the whole
+    // leading-marker pattern), and groupBulletsByExperience deliberately
+    // refuses to key on an empty string — so a pooled marker-only line could
+    // never be attributed to the role that owns it and would only inflate
+    // the Specificity denominator with content-free text.
+    it("a marker-and-digit line ('• 4.') contributes nothing to the bullet pool", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({ experience: ["• 4."] }),
+        }),
+      );
+      expect(result.bullets ?? []).toHaveLength(0);
+    });
+
+    it("a lone-bullet merge of glyph + digit ('•' + '4.') contributes nothing to the bullet pool", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({ experience: ["•", "4."] }),
+        }),
+      );
+      expect(result.bullets ?? []).toHaveLength(0);
+    });
+
+    it("a marker-prefixed line with real content still pools ('• Shipped X')", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({ experience: ["• Shipped X"] }),
+        }),
+      );
+      expect(result.bullets!.map((b) => b.text)).toEqual(["Shipped X"]);
+    });
+
+    // Boundary at ANON_MIN_BULLETS_TO_GRADE (3): before this fix, a marker-only
+    // line like "• 4." still counted toward pool.total, so 2 real bullets plus
+    // one such line could cross the threshold on padding alone. Now that the
+    // line is excluded outright, the same résumé correctly reads as 2 real
+    // bullets — genuinely below the threshold, not "3 bullets, one of them
+    // junk" — and the pre-existing gradability cliff applies as designed.
+    const realBullets = [
+      "- Led migration of 3 microservices reducing latency by 40%",
+      "- Managed team of 5 engineers shipping weekly releases",
+    ];
+
+    it("2 real bullets plus a marker-only line stay ungradable — junk no longer pads the count to the threshold", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({ experience: [...realBullets, "• 4."] }),
+        }),
+      );
+      expect(result.specificity.totalBullets).toBe(2);
+      expect(result.specificity.gradable).toBe(false);
+      expect(result.structure.gradable).toBe(false);
+    });
+
+    it("3 real bullets clear the threshold and grade normally", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({
+            experience: [
+              ...realBullets,
+              "- Reduced infrastructure cost by 35% through right-sizing and reserved capacity",
+            ],
+          }),
+        }),
+      );
+      expect(result.specificity.totalBullets).toBe(3);
+      expect(result.specificity.gradable).toBe(true);
+      expect(result.structure.gradable).toBe(true);
+    });
+  });
+
   describe("redacted role dates (#31)", () => {
     // A role whose date is a redaction stub ("August 20XX") stays incomplete,
     // but must score distinctly from a role with no date text at all and drive

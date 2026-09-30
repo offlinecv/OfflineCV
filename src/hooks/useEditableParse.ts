@@ -1142,6 +1142,22 @@ export function useEditableParse(): EditableParse {
 
   const setBulletField = useCallback(
     (id: string, value: string | undefined, added?: AddedBulletRef) => {
+      // A marker-only replacement (`"3."`, `"•"`) is refused outright, for an
+      // added bullet and a parsed one alike. `extractBulletsFromLines` drops
+      // any line `isContentlessBulletLine` flags (#678), so the write would
+      // land in state and then render nowhere — no row to edit, Remove or Undo
+      // it from, only `Reset to parsed`, which discards every other edit too.
+      // This is the same "no change" `replaceAddedBulletLine` already gives a
+      // blank edit, and the same predicate `addBullet` validates against
+      // (#660). A blank value is NOT caught here: for a parsed bullet it means
+      // "revert to the parsed text", which `applyBulletTextOverrides` owns.
+      if (
+        value !== undefined &&
+        value.trim() !== "" &&
+        isContentlessBulletLine(value)
+      ) {
+        return;
+      }
       if (added !== undefined && value !== undefined) {
         // Try the added-bullets bucket FIRST: a user-added bullet exists nowhere
         // else, so an override — which `applyOverrides` folds in by

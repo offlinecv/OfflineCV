@@ -67,13 +67,14 @@
  * text while the row (and the removal's `AddedBulletRef.text`) read the edited
  * one, and the splice would miss — trading an inert edit for an inert removal.
  *
- * The two READ-ONLY helpers, {@link isContentlessBulletLine} and {@link
- * findAddedBulletEntry}, are #660: the normalised key this module matches on is
- * empty for a line that is nothing but a marker, and that is the one key the
- * grouping skips — so such a line could neither be validated out at add time nor
- * located from the "Other bullets" group it landed in. Both are expressed over
- * the same {@link normalizeBulletText} as the writers, so the add-time validator
- * and the grouper cannot disagree about "empty" again.
+ * The two READ-ONLY helpers, {@link isContentlessBulletLine} (imported from
+ * group-bullets.ts, #678 — shared with the scorer's `extractBulletsFromLines`)
+ * and {@link findAddedBulletEntry}, are #660: the normalised key this module
+ * matches on is empty for a line that is nothing but a marker, and that is the
+ * one key the grouping skips — so such a line could neither be validated out at
+ * add time nor located from the "Other bullets" group it landed in. Both are
+ * expressed over the same {@link normalizeBulletText} as the writers, so the
+ * add-time validator and the grouper cannot disagree about "empty" again.
  *
  * Pure: no React, no mutation of the input. Both WRITERS return the input map
  * by REFERENCE when nothing matched, so the caller can tell "written" from "no
@@ -82,8 +83,16 @@
  * edit falls through to `bulletOverrides`.
  */
 
-import { normalizeBulletText } from "../score/group-bullets.ts";
+import {
+  isContentlessBulletLine,
+  normalizeBulletText,
+} from "../score/group-bullets.ts";
 import type { AddedBullets } from "../../hooks/useEditableParse.ts";
+
+/** Re-exported for this module's own consumers (#678: the predicate itself now
+ *  lives in group-bullets.ts, shared with `extractBulletsFromLines` in
+ *  score.ts, so the scorer and the editor can't disagree about "empty"). */
+export { isContentlessBulletLine };
 
 /**
  * The predicate "this bucket line is the one `text` names" — the ONE matcher all
@@ -107,31 +116,6 @@ function sameBulletLine(text: string): (line: string) => boolean {
     return (line) => line.trim() === verbatim;
   }
   return (line) => normalizeBulletText(line) === target;
-}
-
-/**
- * True when `text` carries no bullet CONTENT: it is blank, or it is nothing but
- * a leading bullet / numbered marker — `"•"`, `"-"`, `"*"`, `"–"`, `"1."`,
- * `"2)"`.
- *
- * This is the predicate `addBullet` validates against (#660), and it is defined
- * over {@link normalizeBulletText} deliberately. That normaliser produces the
- * key the grouping (`groupBulletsByExperience`) and both writers below match on,
- * and the empty string is the ONE key the grouper skips
- * (`if (key && !lineToExpIdx.has(key))`). A line that normalises to it therefore
- * cannot be attributed to the entry that owns it: it falls through to the "Other
- * bullets" group, which has no entry — and so no bucket — for a Remove to
- * splice. A blank-after-`trim()` check (what `addBullet` used to do) does not see
- * one: `"1."` trims to `"1."`.
- *
- * Note what this does NOT reject: a marker-PREFIXED line with real content.
- * `normalizeBulletText` strips one leading marker by design, so `"• Shipped X"`
- * normalises to `"shipped x"` and is accepted — and still matches its owning
- * entry, since the description copy and the `"• "`-prefixed pool copy both
- * normalise through that same strip.
- */
-export function isContentlessBulletLine(text: string): boolean {
-  return normalizeBulletText(text) === "";
 }
 
 /**

@@ -50,6 +50,30 @@ export function normalizeBulletText(s: string): string {
     .toLowerCase();
 }
 
+/**
+ * True when `text` carries no bullet CONTENT: it is blank, or it is nothing but
+ * a leading bullet / numbered marker — `"•"`, `"-"`, `"*"`, `"–"`, `"1."`,
+ * `"2)"`.
+ *
+ * This is the predicate `addBullet` validates against (#660), and
+ * `extractBulletsFromLines` (score.ts, #678) skips a pooled line on, defined
+ * over {@link normalizeBulletText} deliberately: that normaliser produces the
+ * key `groupBulletsByExperience` matches on, and the empty string is the ONE
+ * key the grouper skips (`if (key && !lineToExpIdx.has(key))`). A line that
+ * normalises to it therefore cannot be attributed to the entry that owns it —
+ * in the editor it falls through to the "Other bullets" group, which has no
+ * entry for a Remove to splice; in the scorer it would only inflate the
+ * Specificity denominator with content-free text. A blank-after-`trim()` check
+ * does not see one: `"1."` trims to `"1."`.
+ *
+ * Note what this does NOT reject: a marker-PREFIXED line with real content.
+ * `normalizeBulletText` strips one leading marker by design, so `"• Shipped X"`
+ * normalises to `"shipped x"` and is accepted.
+ */
+export function isContentlessBulletLine(text: string): boolean {
+  return normalizeBulletText(text) === "";
+}
+
 // ── Grading predicate ───────────────────────────────────────────────────────
 
 /**
