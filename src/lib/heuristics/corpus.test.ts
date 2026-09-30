@@ -172,7 +172,7 @@ const TRUTH_ANNOTATED_FIELD_FLOOR = 150;
  * `npm run check:baselines` on every run, and bounded here — undescribed debt may
  * not GROW. File the issue and flip the entry to `open`; then lower this.
  */
-const UNFILED_TRUTH_CEILING = 3;
+const UNFILED_TRUTH_CEILING = 1;
 
 /** Generator category = the fixture root's immediate subdirectory. */
 function categoryOf(repoRelPdfPath: string): string {

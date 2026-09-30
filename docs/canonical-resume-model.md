@@ -287,6 +287,12 @@ Widening the accepted charset — teaching the exporter to emit `-` or `|` where
 fixtures. §7 above documents an adjacent tradeoff of this class (the one-line header
 removing the title/company structural signal, baselined in `KNOWN_FAILURES`).
 
+This scopes the exporter/parser separator grammar for a **parsed** employer line, not the
+routing of an org that itself contains a sub-org (e.g. "University — Dept"): that contract
+— outer org → `company`, sub-org → `team`, drawn order not load-bearing — is written down
+in `disambiguateCompanyTitle`'s docblock in `src/lib/heuristics/extract/experience-disambiguate.ts`
+(#836).
+
 **Explicitly out of scope for this contract:**
 
 - Normalizing user-authored hyphens inside a title. `Role - Subtitle` is the user's text;

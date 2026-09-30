@@ -147,7 +147,10 @@ the recorded decision that tolerates it (`"accepted"`). If no issue describes it
 use `status: "unfiled"` with `issue: null` and state the wrong parse in the `note`;
 `npm run check:baselines` prints every unfiled entry and `corpus.test.ts` caps how many
 may exist. A field nobody has read yet goes in `unannotated` instead — that is *not*
-the same as recording an empty list, which asserts the page carries none.
+the same as recording an empty list, which asserts the page carries none. An employer
+line naming an org and a sub-org (e.g. "University — Dept") is recorded as the whole
+drawn phrase with an `accepted` entry pointing at the routing contract in
+`src/lib/heuristics/extract/experience-disambiguate.ts` (#836).
 
 A truth file holds literal contact details, so it is swept by `npm run check:fixtures`
 along with the PDFs. The persona rules on this page apply to it unchanged.

@@ -1367,6 +1367,25 @@ function applyTrailingCompanyGuard(
  *   - Otherwise the first line (top of the entry) is the company.
  *   - Team is an optional third piece, often separated by "—", ",", or "|".
  *
+ * **Org / sub-org contract (#836).** When an employer line names an
+ * organisation and a sub-organisation ("Multicultural Engineering Program –
+ * State Polytechnic University", "Ohio Valley State University — IT Service
+ * Desk"), the OUTER org routes to `company` and the sub-org routes to `team` —
+ * a `company` of the whole drawn phrase would match nothing on an ATS, while
+ * `team` exists precisely to hold the inner org. This is decided, not
+ * incidental: which half is drawn FIRST does not matter (sub-org-first and
+ * org-first both route the same way), because the mechanism is the same
+ * `looksLikeCompany` org-hint the bullet above already uses — whichever split
+ * segment carries the legal-suffix/institution tell (`COMPANY_SUFFIX_RE` or
+ * "University"/"College"/…) is the company, and every other segment on that
+ * header falls to `team` (or `title`, if it reads as one). The hint is
+ * closed-vocabulary, so a line where NEITHER half is recognizable as an
+ * organisation is not covered by this contract and falls through to the
+ * plainer heuristics below. A ground-truth sidecar's `experience.company` for
+ * such a line legitimately records the whole drawn phrase (a truth file's job
+ * is to state what the page says) while the parser's split is `accepted` as
+ * the intended reading, not a bug to fix.
+ *
  * Single-line `·`-delimited headers ("Title · Company, City, ST · Team", #217)
  * are tokenized here into up to three segments before the tiebreaker runs, so
  * the title and company are extracted rather than staying glued together. The
