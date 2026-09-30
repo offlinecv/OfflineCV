@@ -28,6 +28,13 @@
  * wrap across, and the actions+dates cluster its own full-width row below,
  * right-aligned so the dates still read as "the end of the row". `sm:` and up
  * restores the single flush-right row, unchanged from before.
+ *
+ * `is_current` (#686) IS committable, through the "Current role" checkbox
+ * `RoleDateRange` mounts beside the End cell (`RoleCurrentToggle`, its own
+ * sibling component — this file and `ReconstructedRole.tsx` are already past
+ * the ~200-LOC guideline). Ticking it clears the End cell; unticking writes
+ * an explicit "not current". See `edit/experience-dates.ts` for the pair rule
+ * both directions run through.
  */
 
 import type { ReactNode } from "react";
@@ -43,12 +50,17 @@ import {
 } from "../../lib/edit/role-display.ts";
 import { FixItTarget } from "./FixItTarget.tsx";
 import { SECTION_IDS } from "../../lib/anchors.ts";
+import { RoleCurrentToggle } from "./RoleCurrentToggle.tsx";
 
-/** `is_current` is excluded by type: it is derived from the date pair by
- *  `edit/experience-dates.ts`, so no cell may commit it directly (#672). */
-type RoleFieldChange = (
-  field: Exclude<keyof ExperienceFieldOverrides, "is_current">,
-  value: string,
+/** `value` is `boolean` only for the `is_current` field (#686, the "Current
+ *  role" checkbox); every other field commits a plain string. Correlated by
+ *  `K`, matching `setExperienceField`'s own generic, so `onFieldChange("title",
+ *  true)` is a compile error instead of a silent bad override. `Required<>`
+ *  because every call site here commits a concrete value, never `undefined`
+ *  (unlike `setExperienceField`, which also clears a key). */
+type RoleFieldChange = <K extends keyof ExperienceFieldOverrides>(
+  field: K,
+  value: Required<ExperienceFieldOverrides>[K],
 ) => void;
 
 export interface RoleHeaderProps {
@@ -118,7 +130,7 @@ interface EditableRoleHeaderProps {
  * absent one can be ADDED, not just corrected.
  */
 function EditableRoleHeader({
-  display: { title, company, location, team, startDate, endDate },
+  display: { title, company, location, team, startDate, endDate, isCurrent },
   onFieldChange,
   datesTarget,
   actions,
@@ -191,6 +203,7 @@ function EditableRoleHeader({
           <RoleDateRange
             startDate={startDate}
             endDate={endDate}
+            isCurrent={isCurrent}
             onFieldChange={onFieldChange}
             datesTarget={datesTarget}
           />
@@ -203,14 +216,19 @@ function EditableRoleHeader({
 interface RoleDateRangeProps {
   startDate: string | undefined;
   endDate: string | undefined;
+  /** Ongoing role (#686) — `endDate` already reads "Present" when this is
+   *  true, but the End cell itself has to stop looking editable. */
+  isCurrent: boolean;
   onFieldChange: RoleFieldChange;
   datesTarget: boolean;
 }
 
-/** The flush-right "start – end" pair, in the tertiary metadata colour. */
+/** The flush-right "start – end" pair, plus the "Current role" checkbox
+ *  (#686), in the tertiary metadata colour. */
 function RoleDateRange({
   startDate,
   endDate,
+  isCurrent,
   onFieldChange,
   datesTarget,
 }: RoleDateRangeProps) {
@@ -225,26 +243,41 @@ function RoleDateRange({
     />
   );
   return (
-    <span className="flex shrink-0 items-baseline gap-x-1.5 text-content-tertiary">
+    <span className="flex shrink-0 flex-wrap items-baseline justify-end gap-x-1.5 gap-y-1 text-content-tertiary">
       {/* Always wrapped, so moving the anchor to the next undated role on
           commit never changes this role's tree and remounts the focused field. */}
       <FixItTarget anchorId={datesTarget ? SECTION_IDS.experienceDates : undefined}>
         {startField}
       </FixItTarget>
-      {/* Edit chrome unless both ends show (#913), or it dangles at rest. */}
+      {/* Edit chrome unless both ends show (#913), or it dangles at rest.
+          `endDate` already reads "Present" while `isCurrent`, so this stays
+          visible on an ongoing role without a separate check. */}
       <span
         aria-hidden="true"
         className={startDate && endDate ? undefined : "edit-chrome"}
       >
         –
       </span>
-      <EditableField
-        value={endDate}
-        placeholder="end date"
-        label="End date"
-        textSize="xs"
-        validate={validateDate}
-        onCommit={(v) => onFieldChange("end_date", v)}
+      {/* "Present" is drawn as plain text, not the editable End cell — an
+          ongoing role has no end date TO edit, and leaving the affordance up
+          would invite typing over a value the checkbox alone controls
+          (#686). */}
+      {isCurrent ? (
+        <span>{endDate}</span>
+      ) : (
+        <EditableField
+          value={endDate}
+          placeholder="end date"
+          label="End date"
+          textSize="xs"
+          validate={validateDate}
+          onCommit={(v) => onFieldChange("end_date", v)}
+        />
+      )}
+      <RoleCurrentToggle
+        checked={isCurrent}
+        disabled={!startDate}
+        onChange={(checked) => onFieldChange("is_current", checked)}
       />
     </span>
   );

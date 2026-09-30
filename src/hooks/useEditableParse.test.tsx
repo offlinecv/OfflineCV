@@ -237,6 +237,82 @@ describe("useEditableParse — added-role date slots (#672)", () => {
   });
 });
 
+describe("useEditableParse — added-role 'Current role' toggle (#686)", () => {
+  it("ticking clears any end date already typed", () => {
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "start_date", "2022"));
+    act(() => api.setEntryField(id, "end_date", "2024"));
+    act(() => api.setEntryField(id, "is_current", true));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2022",
+      end_date: "",
+      is_current: true,
+    });
+  });
+
+  it("unticking writes an explicit false, no end date required", () => {
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "start_date", "2022"));
+    act(() => api.setEntryField(id, "is_current", true));
+    act(() => api.setEntryField(id, "is_current", false));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2022",
+      end_date: "",
+      is_current: false,
+    });
+  });
+
+  it("a later end date still un-currents the role (#682, unchanged)", () => {
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "start_date", "2022"));
+    act(() => api.setEntryField(id, "is_current", true));
+    act(() => api.setEntryField(id, "end_date", "2024"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2022",
+      end_date: "2024",
+      is_current: false,
+    });
+  });
+
+  it("drops an unanchored tick, mirroring the parsed-role rule", () => {
+    // The checkbox is disabled without a start date at the UI layer
+    // (`RoleCurrentToggle`); this is the defensive floor underneath it —
+    // `normalizeExperienceDates` still refuses to produce a bare "ongoing"
+    // claim with nothing to anchor it.
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "is_current", true));
+    expect(api.addedEntries[0].is_current).toBe(false);
+    expect(api.addedEntries[0].start_date).toBe("");
+  });
+
+  it("isAddedEntryEmpty is unaffected by is_current alone", () => {
+    // The checkbox can only ever be true alongside a start date, which
+    // already marks the header non-empty — but `is_current` itself must not
+    // be read as "content", nor crash the string-only `.trim()` check.
+    const blank: AddedEntry = { id: "added:0", section: "experience", title: "" };
+    expect(isAddedEntryEmpty({ ...blank, is_current: true }, {})).toBe(true);
+    expect(
+      isAddedEntryEmpty({ ...blank, start_date: "2022", is_current: true }, {}),
+    ).toBe(false);
+  });
+});
+
 describe("useEditableParse — Skills category edits (#476)", () => {
   const cats: SkillCategory[] = [
     { label: "Frontend", skills: ["React", "TypeScript"] },

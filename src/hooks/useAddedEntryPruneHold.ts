@@ -58,14 +58,19 @@
  *     release prune unmount the row with that text still in it. Silent data
  *     loss, off a timer, with no user action at the moment of loss.
  *
- *     So the gate asks whether the entry holds an OPEN INPUT as well. Read mode
- *     inside a `RoleEntry` renders only buttons — every `EditableField` read
- *     mode is a `<span role="button">`, `InlineBulletAdd` collapses to an
- *     `AddPill`, and the remove/rewrite controls are `Button`s — so an `input`
- *     or `textarea` anywhere inside the entry IS an open draft. The only other
- *     producer in that subtree is `RewriteReviewList`'s edit-in-place field,
- *     which is equally one. A false positive could therefore only ever SPARE an
- *     entry, which is the safe direction: the section-exit pass still sweeps it.
+ *     So the gate asks whether the entry holds an OPEN TEXT INPUT as well. Read
+ *     mode inside a `RoleEntry` renders only buttons — every `EditableField`
+ *     read mode is a `<span role="button">`, `InlineBulletAdd` collapses to an
+ *     `AddPill`, and the remove/rewrite controls are `Button`s — so a text
+ *     `input` or `textarea` anywhere inside the entry IS an open draft. The
+ *     only other producer in that subtree is `RewriteReviewList`'s
+ *     edit-in-place field, which is equally one. A false positive could
+ *     therefore only ever SPARE an entry, which is the safe direction: the
+ *     section-exit pass still sweeps it. `type="checkbox"` (#686, the
+ *     "Current role" toggle) is excluded from the query: it is a PERMANENT
+ *     fixture of an editable role header, present whether or not anything is
+ *     mid-edit, and it commits on click with no uncommitted draft state of its
+ *     own — counting it would make every added role unprunable forever.
  *   - **One entry, not the section.** The pass spares every id but the one
  *     whose stay just ended. `pruneEmptyAddedEntries` is section-wide, and this
  *     trigger is a timer rather than the user leaving, so an unnarrowed sweep
@@ -295,9 +300,14 @@ function keepsEntry(host: RefObject<HTMLElement | null> | undefined): boolean {
   const active = node.ownerDocument.activeElement;
   // `contains` includes the node itself, so a focused container counts too.
   if (active !== null && node.contains(active)) return true;
-  // Read mode inside a `RoleEntry` renders only buttons, so a text control
+  // Read mode inside a `RoleEntry` renders only buttons, so a TEXT control
   // present here IS an open draft — see the module docblock's gate section.
-  return node.querySelector("input, textarea") !== null;
+  // `type="checkbox"` is excluded (#686): the "Current role" checkbox is a
+  // permanent fixture of every editable role header, not a transient draft —
+  // it commits on click, with no separate uncommitted state to lose — so
+  // treating its mere presence as "open draft" would make every added role
+  // permanently unprunable and un-releasable.
+  return node.querySelector('input:not([type="checkbox"]), textarea') !== null;
 }
 
 /**

@@ -64,6 +64,7 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
   applyNormalizedDateOverrides,
+  clearEndDateOnCurrentTick,
   normalizeExperienceDates,
   relocatedEndAnchor,
   type ExperienceDateFields,
@@ -326,6 +327,12 @@ export interface AddedEntry {
   team?: string;
   start_date?: string;
   end_date?: string;
+  /** Ongoing role (#686) — Experience only; ignored by other sections. Mirrors
+   *  {@link ExperienceFieldOverrides.is_current}: absent/`false` means "not
+   *  current". Added before `#686` shipped, a persisted from-scratch draft
+   *  (`EditSnapshot`, #313) carries no such key — backward-compatible, since
+   *  `undefined` here means the same thing `false` does. */
+  is_current?: boolean;
   /** Achievement year (achievements carry a single year, not a range). */
   year?: string;
   /** Achievement type label ("Patent", "Best Paper Award") — the bold run, and
@@ -348,6 +355,12 @@ export interface AddedEntry {
  * `{start_date: "2019", end_date: "2022"}` end-first would collapse the lone end
  * date to `{start_date: "2022"}` and then overwrite it, restoring the entry as
  * `{start_date: "2019", end_date: ""}`. Keep `start_date` ahead of `end_date`.
+ * `is_current` (#686) sits right after `end_date` for the same reason: ticking
+ * it clears `end_date` as a side effect (see `setEntryField`), so replaying it
+ * BEFORE a real `end_date` value would let that value stomp the tick straight
+ * back off — placing it after means replay's own `end_date` write already
+ * landed, and `is_current: true` here is the entry's own record that the role
+ * has no end date at all, so committing `true` after is idempotent with it.
  *
  * #814's parking does NOT rescue that ordering, deliberately: replay writes every
  * field of a fresh entry in ONE synchronous burst, so `addedEntriesRef` has not
@@ -361,6 +374,7 @@ const ADDED_ENTRY_FIELDS = [
   "team",
   "start_date",
   "end_date",
+  "is_current",
   "year",
   "achievementType",
 ] as const;
@@ -375,14 +389,20 @@ export type AddedEntryField = (typeof ADDED_ENTRY_FIELDS)[number];
  * anything (#379) — such an entry must not persist in the list, the score, or
  * the exported PDF. Iterates {@link ADDED_ENTRY_FIELDS} so a newly-added header
  * field is covered automatically, in lockstep with the replay/snapshot tuple.
+ *
+ * `is_current` (#686) is boolean, not string, and is deliberately never itself
+ * "content": the checkbox is disabled without a start date, so a `true` here
+ * can only coexist with a populated `start_date`, which already marks the
+ * header non-empty.
  */
 export function isAddedEntryEmpty(
   entry: AddedEntry,
   addedBullets: AddedBullets,
 ): boolean {
-  const headerEmpty = ADDED_ENTRY_FIELDS.every(
-    (f) => (entry[f] ?? "").trim().length === 0,
-  );
+  const headerEmpty = ADDED_ENTRY_FIELDS.every((f) => {
+    const v = entry[f];
+    return typeof v !== "string" || v.trim().length === 0;
+  });
   return headerEmpty && (addedBullets[entry.id] ?? []).length === 0;
 }
 
@@ -737,8 +757,13 @@ export interface EditableParse {
     section: AddableSection,
     isHeld?: (entryId: string) => boolean,
   ) => void;
-  /** Edit one header field on an added entry. */
-  setEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  /** Edit one header field on an added entry. `value` is `boolean` only for
+   *  `is_current` (#686); every other field is a plain string. */
+  setEntryField: (
+    id: string,
+    field: AddedEntryField,
+    value: string | boolean,
+  ) => void;
   /** Bullet lines appended to entries, keyed by entry key (parsedEntryKey or
    *  an added entry's id). */
   addedBullets: AddedBullets;
@@ -1049,6 +1074,29 @@ export function useEditableParse(): EditableParse {
    */
   const relocatedEndsRef = useRef<Record<string, string>>({});
 
+  /**
+   * The PARSED (pre-override) `is_current` for a parsed role, keyed by its
+   * override-map index — what #686's restore rule in
+   * `applyNormalizedDateOverrides` needs and neither `resolvedEntry` nor the
+   * override map can answer once `is_current` has been written even once
+   * (see that function's docblock for why).
+   *
+   * Captured lazily rather than threaded down from the pristine parse: no
+   * component between here and `ReconstructedResume` ever sees the pristine
+   * parse (`result` is edit-folded by the time it reaches this hook's
+   * callers), but every commit on a role — not only a date commit — hands
+   * `setExperienceField` the CURRENT overrides-APPLIED entry as
+   * `resolvedEntry`. The one moment that value coincides with the parse is
+   * the first commit seen for an index whose `is_current` key carries no
+   * override yet (`prior.is_current === undefined`) — captured then, and
+   * read back on every later commit. A ref, not state: it is provenance
+   * about the immutable parse, not something a re-render should ever need to
+   * see change. `resetAll` clears it, like `relocatedEndsRef`: the SAME
+   * `useEditableParse` instance survives a `parseKey` change, and this cache
+   * is keyed by an index space the new parse redefines.
+   */
+  const parsedIsCurrentRef = useRef<Record<number, boolean>>({});
+
   // The ONE writer of `addedBullets`. The ref — not React state — is the source
   // of pending truth: it is assigned synchronously here, before the setState, so
   // a second write in the SAME tick composes on top of the first instead of on
@@ -1092,6 +1140,10 @@ export function useEditableParse(): EditableParse {
       resolvedEntry?: ExperienceDateFields,
     ) => {
       const isDateField = field === "start_date" || field === "end_date";
+      // #686 widens the #672 pair rule to the flag itself: a checkbox commit
+      // runs the same normalisation a date-cell commit does, so the map and
+      // the card can never disagree about "is this role ongoing?".
+      const isPairField = isDateField || field === "is_current";
 
       // #814, decided BEFORE the updater so the read-then-clear of the parking
       // memory happens exactly once. `restoredEnd` is the end date this rule
@@ -1124,14 +1176,40 @@ export function useEditableParse(): EditableParse {
         }
         if (restoredEnd !== undefined) entry.end_date = restoredEnd;
 
-        // Normalise on COMMIT, not at render: the #672 rule runs where the
-        // override is WRITTEN, so the map and the card can never hold different
-        // pairs. `prior` — the map BEFORE this write — is what keeps the sparse
-        // write-back honest: `resolvedEntry` already carries every earlier edit,
-        // so a key that has one may not be compared against it. See
-        // `applyNormalizedDateOverrides`.
-        if (resolvedEntry && isDateField) {
-          applyNormalizedDateOverrides(entry, resolvedEntry, prior);
+        if (resolvedEntry) {
+          // Gated on `resolvedEntry` like the rule itself below — replay
+          // writes a snapshot's keys verbatim and must not re-derive this
+          // from a value it is about to write on its own.
+          clearEndDateOnCurrentTick(field, value, entry);
+          // An end-date commit may be UNDOING a `false` this very rule pinned
+          // on an EARLIER commit purely because an end date existed then —
+          // not something the user ever asserted about `is_current` itself.
+          // Dropping it here lets the rule below re-derive the flag fresh
+          // off the parsed value instead of carrying that pin forward
+          // forever, which is #686: withdrawing the end date that justified
+          // the drop must be able to restore it.
+          if (field === "end_date") delete entry.is_current;
+
+          // Cache the PARSED `is_current` the first time this role's map has
+          // no override on the key yet — see `parsedIsCurrentRef`'s docblock.
+          if (prior.is_current === undefined) {
+            parsedIsCurrentRef.current[index] = resolvedEntry.is_current ?? false;
+          }
+        }
+
+        // Normalise on COMMIT, not at render: the #672/#686 rule runs where
+        // the override is WRITTEN, so the map and the card can never hold
+        // different pairs. `prior` — the map BEFORE this write — is what
+        // keeps the sparse write-back honest: `resolvedEntry` already carries
+        // every earlier edit, so a key that has one may not be compared
+        // against it. See `applyNormalizedDateOverrides`.
+        if (resolvedEntry && isPairField) {
+          applyNormalizedDateOverrides(
+            entry,
+            resolvedEntry,
+            prior,
+            parsedIsCurrentRef.current[index],
+          );
         }
 
         return { ...prev, [index]: entry };
@@ -1608,12 +1686,20 @@ export function useEditableParse(): EditableParse {
    * A cleared slot is spelled `""`, not a deleted key — the opposite of
    * {@link applyNormalizedExperienceDates}, which deletes precisely because
    * `"end_date" in entry` is load-bearing on the parsed-resume shape.
-   * `AddedEntry`'s fields are plain strings and `pushAddedEntry` re-normalises
-   * downstream, so the two conventions are each right for their own container.
+   * `AddedEntry`'s fields are plain strings (except `is_current`, #686) and
+   * `pushAddedEntry` re-normalises downstream, so the two conventions are each
+   * right for their own container.
+   *
+   * `is_current` (#686) runs through the SAME normalisation as a date-cell
+   * commit — an added entry has no parsed baseline to restore against, so
+   * unlike the override-map path there is no #686 restore rule to run here:
+   * ticking clears `end_date` (the user's last action wins) and unticking
+   * simply writes `false`.
    */
   const setEntryField = useCallback(
-    (id: string, field: AddedEntryField, value: string) => {
+    (id: string, field: AddedEntryField, value: string | boolean) => {
       const isDateField = field === "start_date" || field === "end_date";
+      const isPairField = isDateField || field === "is_current";
       const current = addedEntriesRef.current.find((e) => e.id === id);
 
       // #814, the same parking the override map does — see `relocatedEndsRef`.
@@ -1624,7 +1710,9 @@ export function useEditableParse(): EditableParse {
         const key = addedAnchorKey(id);
         const next = resolveDateCommit(
           field,
-          value,
+          // `isDateField` is what makes this true — `is_current` is the only
+          // non-string member of the union, and this branch never reaches it.
+          value as string,
           current,
           relocatedEndsRef.current[key],
         );
@@ -1636,15 +1724,18 @@ export function useEditableParse(): EditableParse {
       setAddedEntries((prev) =>
         prev.map((e) => {
           if (e.id !== id) return e;
-          const nextEntry = { ...e, [field]: value };
+          const nextEntry = { ...e, [field]: value } as AddedEntry;
           if (restoredEnd !== undefined) nextEntry.end_date = restoredEnd;
-          if (e.section === "experience" && isDateField) {
+          clearEndDateOnCurrentTick(field, value, nextEntry);
+          if (e.section === "experience" && isPairField) {
             const norm = normalizeExperienceDates({
               start_date: nextEntry.start_date,
               end_date: nextEntry.end_date,
+              is_current: nextEntry.is_current,
             });
             nextEntry.start_date = norm.start_date ?? "";
             nextEntry.end_date = norm.end_date ?? "";
+            nextEntry.is_current = norm.is_current ?? false;
           }
           return nextEntry;
         }),
@@ -1796,6 +1887,11 @@ export function useEditableParse(): EditableParse {
     setAddedEntries([]);
     // The relocation memory is about entries that no longer exist (#814).
     relocatedEndsRef.current = {};
+    // Same reasoning for the PARSED-is_current cache (#686): it is provenance
+    // about the parse this hook instance is about to replace, keyed by an
+    // index space a new parse redefines. Cleared here, not in `replay` — see
+    // `parsedIsCurrentRef`'s docblock.
+    parsedIsCurrentRef.current = {};
     // Through the writer, so the ref is cleared too — otherwise a reset leaves
     // the pending-truth ref holding the pre-reset buckets, and the next
     // `addBullet`/`removeBullet` in that same tick would resurrect them.

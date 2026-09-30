@@ -47,6 +47,20 @@
  * from the map, not from the screen — see {@link applyNormalizedDateOverrides},
  * which owns that hazard and the delta arithmetic it forces.
  *
+ * `is_current` ITSELF IS A COMMITTABLE FIELD (#686), through the same seam a
+ * date cell commits through — `useEditableParse.setExperienceField` runs this
+ * rule for an `is_current` write too, not only for `start_date`/`end_date`.
+ * Ticking "Current role" is the user's last action winning: the commit also
+ * clears `end_date` (as `""`, the map's existing spelling for a clear), so the
+ * map and the export agree on "2020 – Present" rather than racing an end date
+ * against the flag the way an unedited parse sometimes does. Unticking writes
+ * `is_current: false` outright — an explicit "draw the start date alone"
+ * rather than a value this rule would ever produce on its own. Withdrawing an
+ * end date that this rule had used to drop the flag restores it, rather than
+ * leaving the drop pinned — see {@link applyNormalizedDateOverrides}'s
+ * `parsedIsCurrent` parameter for why `resolvedEntry` alone cannot answer that
+ * once the flag has been written even once.
+ *
  * WHAT THE RULE OWES BACK. Re-anchoring is not free: the End cell the user typed
  * into is now empty and the value sits in Start, so the next thing they type into
  * Start lands on top of it. Filling the pair End-first therefore destroyed the
@@ -171,6 +185,32 @@ export function normalizeExperienceDates(
 }
 
 /**
+ * The #686 "last action wins" side effect of TICKING "Current role": clears
+ * `entry.end_date` so the map (and the export) agree on "2020 – Present"
+ * rather than racing the flag against a stale end date. The two entry-shaped
+ * commit paths that write `is_current` directly — `useEditableParse`'s
+ * override map (`setExperienceField`) and its added-entry writer
+ * (`setEntryField`) — both call this right after writing the raw field, so a
+ * future change to which value wins has one call to edit, not two.
+ *
+ * Deliberately NOT folded into {@link normalizeExperienceDates} itself: that
+ * function resolves an already-written pair and gives an END DATE precedence
+ * over a stale `is_current` (see its table's last two rows) — the opposite of
+ * what a just-ticked checkbox commits. This helper is the one-time "user just
+ * ticked it" side effect that runs before that resolution, not a replacement
+ * for it.
+ */
+export function clearEndDateOnCurrentTick(
+  field: string,
+  value: string | boolean | undefined,
+  entry: { end_date?: string },
+): void {
+  if (field === "is_current" && value === true) {
+    entry.end_date = "";
+  }
+}
+
+/**
  * The value {@link normalizeExperienceDates} MOVES out of the End cell and into
  * the Start slot for this pair — `undefined` when nothing moves.
  *
@@ -272,16 +312,33 @@ function writeDateOverride(
  * nobody changed.
  *
  * Mutates `entry` in place; `resolvedEntry` and `prior` are read-only.
+ *
+ * `parsedIsCurrent` (#686) is the PRISTINE, pre-override `is_current` — not
+ * `resolvedEntry.is_current`, which is the same "already carries earlier
+ * edits" problem `prior` exists for above, one field over. Once an end-date
+ * commit has forced the flag to `false` (an end date says the role ended, so
+ * the pair rule drops it), `resolvedEntry.is_current` is ALSO gone — the fold
+ * deletes rather than pins a falsy key — so there is no way to recover "was
+ * this role parsed as ongoing?" from either `entry` or `resolvedEntry` once
+ * that has happened once. Defaults to `resolvedEntry.is_current ?? false`,
+ * which is exactly the parse on a key with no override yet — the only
+ * shape the existing unit tests below hand this function, so they keep
+ * passing unchanged.
  */
 export function applyNormalizedDateOverrides(
   entry: ExperienceDateFields,
   resolvedEntry: ExperienceDateFields,
   prior: ExperienceDateFields = {},
+  parsedIsCurrent: boolean = resolvedEntry.is_current ?? false,
 ): void {
   const next = normalizeExperienceDates({
     start_date: entry.start_date ?? resolvedEntry.start_date,
     end_date: entry.end_date ?? resolvedEntry.end_date,
-    is_current: entry.is_current ?? resolvedEntry.is_current,
+    // The third fallback matters only once `entry.is_current` has been reset
+    // by the caller (`useEditableParse`'s `setExperienceField`, on an
+    // end-date commit) AND `resolvedEntry.is_current` is already gone for
+    // the same reason — see the docblock above.
+    is_current: entry.is_current ?? resolvedEntry.is_current ?? parsedIsCurrent,
   });
 
   writeDateOverride(
@@ -301,11 +358,17 @@ export function applyNormalizedDateOverrides(
 
   // `is_current` is absent-or-true out of the rule and boolean-or-absent in the
   // map, so compare the two on their falsy floor rather than by identity.
+  //
+  // Unlike the two date keys above, this comparison is NOT gated on `prior` —
+  // deliberately (#686). The date keys' `alreadyOverridden` guard exists
+  // because a key already in `prior` means `resolvedEntry` is not the parse
+  // for it; but a PRIOR `is_current` override is exactly the case this
+  // parameter exists to see past, so gating the delete on "no prior override"
+  // would keep pinning the very value #686 is about restoring. A key the
+  // user has explicitly driven away from the parsed value is still written —
+  // that just means `nextCurrent` and `parsedIsCurrent` disagree.
   const nextCurrent = next.is_current ?? false;
-  if (
-    prior.is_current === undefined &&
-    nextCurrent === (resolvedEntry.is_current ?? false)
-  ) {
+  if (nextCurrent === parsedIsCurrent) {
     delete entry.is_current;
   } else {
     entry.is_current = nextCurrent;

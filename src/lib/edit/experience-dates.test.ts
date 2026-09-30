@@ -187,6 +187,52 @@ describe("applyNormalizedDateOverrides", () => {
     applyNormalizedDateOverrides({ start_date: "" }, base);
     expect(base).toEqual({ start_date: "2019", end_date: "2022" });
   });
+
+  // #686: withdrawing an end date that this rule used to drop `is_current`
+  // must restore the flag, rather than pinning the drop forever. The two-step
+  // sequence itself — a role parsed `{start:"2019", is_current:true}`, End
+  // committed then cleared — is the REAL bug and is pinned at the hook level
+  // in `useEditableParse.is-current-toggle.repro.test.tsx`, the same reason
+  // `date-slot-sequence.repro.test.tsx` exists beside these unit tests: the
+  // aliasing only shows up once `resolvedEntry` is the overrides-APPLIED
+  // entry from a real second render, which a hand-written `resolved` here
+  // cannot reproduce honestly.
+  it("deletes the override when the normalised flag lands back on the parsed value", () => {
+    // `entry` already reset its own `is_current` (what `setExperienceField`
+    // does on an end-date commit, #686) and `resolvedEntry` has none either
+    // (the fold already dropped it) — the shape this function sees once the
+    // flag has been written and then un-written once already.
+    const entry: Record<string, unknown> = { end_date: "" };
+    const resolvedEntry = { start_date: "2019", end_date: "2022" };
+    applyNormalizedDateOverrides(entry, resolvedEntry, { end_date: "2022" }, true);
+    expect(entry).toEqual({ end_date: "" });
+    expect("is_current" in entry).toBe(false);
+  });
+
+  it("still writes false when the flag genuinely differs from the parse", () => {
+    // Control: an end date that survives the commit keeps the role
+    // non-current, and that IS a real difference from a parsed-current role
+    // — so it is written, not deleted.
+    const entry: Record<string, unknown> = { end_date: "2024" };
+    const resolvedEntry = { start_date: "2019", end_date: "2022" };
+    applyNormalizedDateOverrides(entry, resolvedEntry, {}, true);
+    expect(entry).toMatchObject({ end_date: "2024", is_current: false });
+  });
+
+  it("keeps a deliberate is_current:false regardless of prior — the #686 fix in the other direction", () => {
+    // The tail check no longer gates on `prior.is_current === undefined`, so
+    // this also has to keep working: a role the user has explicitly marked
+    // not-current, re-committed with the SAME date pair, stays written.
+    const entry: Record<string, unknown> = { is_current: false };
+    const resolvedEntry = { start_date: "2019", is_current: false };
+    applyNormalizedDateOverrides(
+      entry,
+      resolvedEntry,
+      { is_current: false },
+      true,
+    );
+    expect(entry).toEqual({ is_current: false });
+  });
 });
 
 describe("relocatedEndAnchor", () => {
