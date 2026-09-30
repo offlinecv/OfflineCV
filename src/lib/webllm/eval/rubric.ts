@@ -16,16 +16,18 @@ import { startsWithActionVerb } from "./verbs.ts";
  * Deterministic rubric: takes the input bullets + a model's raw rewrite
  * output and emits a per-criterion pass/fail record. No judge model.
  *
- * The six criteria are the issue #65 AC list:
+ * The criteria are the issue #65 AC list, plus two added later:
  *
- *   1. numbersPreserved   — set of numeric tokens unchanged
- *   2. oneLinePerBullet   — no embedded `\n` after the runner's split
- *   3. actionVerbLead     — first token of each bullet in the curated set
- *   4. lengthSanity       — each bullet in a sane char band
- *   5. noPreambleLeak     — output doesn't echo prompt scaffolding
- *   6. dedupEffective     — for `redundant` fixtures only: output < input
- *   7. steeringAdherence  — for steering fixtures only (#608): did the output
- *                           obey the instruction it was steered with?
+ *   1. numbersPreserved     — set of numeric tokens unchanged
+ *   2. oneLinePerBullet     — no embedded `\n` after the runner's split
+ *   3. actionVerbLead       — first token of each bullet in the curated set
+ *   4. lengthSanity         — each bullet in a sane char band
+ *   5. noPreambleLeak       — output doesn't echo prompt scaffolding
+ *   6. dedupEffective       — for `redundant` fixtures only: output < input
+ *   7. steeringAdherence    — for steering fixtures only (#608): did the
+ *                             output obey the instruction it was steered with?
+ *   8. noResidualMarkdown   — no output bullet carries a paired `**…**`
+ *                             bold span (#805)
  *
  * Each criterion is computed independently — one failing does NOT
  * short-circuit the others, because the report's per-criterion pass rate
@@ -38,6 +40,15 @@ import { startsWithActionVerb } from "./verbs.ts";
  * land in the 60–180 range). */
 const BULLET_MIN_CHARS = 25;
 const BULLET_MAX_CHARS = 260;
+
+/**
+ * A paired bold span: two `**` markers enclosing at least one non-`*`
+ * character. Deliberately narrow (#805 decision 1) — `*`, `_`, backticks,
+ * `#`, a lone `**`, and an unpaired `**` are NOT residual markdown, because
+ * they're legitimate résumé content (`C*`, `snake_case`, `#1`, `C++`).
+ * Widening this to other markdown shapes is a later change on evidence.
+ */
+const RESIDUAL_BOLD_RE = /\*\*[^*]+\*\*/;
 
 /**
  * Phrases that indicate the model echoed prompt scaffolding into the
@@ -74,6 +85,7 @@ export function emptyRubricForError(): RubricResult {
     noPreambleLeak: false,
     dedupEffective: null,
     steeringAdherence: null,
+    noResidualMarkdown: false,
     judgeCoherence: null,
     perBullet: [],
     droppedNumbers: [],
@@ -182,6 +194,18 @@ export function scoreRubric({
       ? null
       : scoreAdherence(steering.check, outputBullets);
 
+  // ── (8) No residual markdown (#805) ───────────────────────────────────
+  // Reads `perBullet[].text` semantics — post-`cleanRewriteLine`, the
+  // surface that reaches the user. All-or-nothing per record, like
+  // `steeringAdherence`: any bullet carrying a paired `**…**` fails the
+  // whole record; it is not a rate over bullets. Zero bullets is
+  // vacuously true here (there is nothing to carry markdown) — the
+  // criteria that quantify per-bullet quality (`oneLinePerBullet`,
+  // `actionVerbLead`, `lengthSanity`) already fail that case.
+  const noResidualMarkdown = outputBullets.every(
+    (b) => !RESIDUAL_BOLD_RE.test(b),
+  );
+
   const perBullet: PerBulletDiagnostic[] = outputBullets.map((b, i) => ({
     index: i,
     text: b,
@@ -198,6 +222,7 @@ export function scoreRubric({
     noPreambleLeak,
     dedupEffective,
     steeringAdherence,
+    noResidualMarkdown,
     judgeCoherence: null,
     perBullet,
     droppedNumbers: preservation.dropped,

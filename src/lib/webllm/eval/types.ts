@@ -93,6 +93,16 @@ export interface RubricResult {
   /** Output contains none of the prompt-scaffolding echo phrases. */
   noPreambleLeak: boolean;
   /**
+   * No output bullet carries a paired `**…**` bold span (#805). Checked
+   * against `perBullet[].text` — post-`cleanRewriteLine` — so this is
+   * what a downloaded ATS PDF would actually render as literal asterisks.
+   * All-or-nothing per record, like `steeringAdherence`: one bullet with
+   * a paired span fails the whole record. A lone `*`, `_`, backticks,
+   * `#`, or an unpaired `**` do NOT count — those are legitimate résumé
+   * content (`C*`, `snake_case`, `#1`, `C++`).
+   */
+  noResidualMarkdown: boolean;
+  /**
    * For `redundant` fixtures: output bullet count < input bullet count.
    * `null` for non-redundant fixtures (the criterion does not apply).
    */
@@ -288,6 +298,8 @@ export interface AggregateRow {
   actionVerbRate: number;
   lengthSanityRate: number;
   noPreambleLeakRate: number;
+  /** 0..1 share of scored records with no residual `**…**` markdown (#805). */
+  noResidualMarkdownRate: number;
   /** 0..1 across `redundant` fixtures only; `null` if none in the set. */
   dedupEffectiveRate: number | null;
   /** 0..1 across steering-probe fixtures only; `null` if none in the set.

@@ -12,7 +12,7 @@ src/lib/webllm/eval/
 ├── verbs.ts              # curated action-verb set (superset of scorer's)
 ├── adherence.ts          # deterministic steering-adherence checks (#608)
 ├── fixtures.ts           # loads + validates JSON fixtures
-├── rubric.ts             # the seven deterministic criteria
+├── rubric.ts             # the eight deterministic criteria
 ├── prompt-variants.ts    # the shipped prompt + experimental variants
 ├── runner.ts             # iterates (model × variant × fixture)
 ├── report.ts             # JSON + Markdown formatters
@@ -71,10 +71,17 @@ the production bundle is unaffected.
 ## Reading the report
 
 The Markdown report leads with a per-`(model, variant)` aggregate row.
-Six rates (numbers / one-line / verb / length / no-preamble / dedup) and
-the equal-weight composite `Aggregate` column drive the model choice.
-Per-cell records below the aggregate let you trace a failure to a
-specific fixture.
+Seven rates (numbers / one-line / verb / length / no-preamble /
+no-markdown / dedup) and the equal-weight composite `Aggregate` column
+drive the model choice. Per-cell records below the aggregate let you
+trace a failure to a specific fixture.
+
+The **No-markdown** column (#805) is `noResidualMarkdown`: false when any
+output bullet carries a paired `**…**` bold span — the shape that reaches
+a downloaded ATS PDF as literal asterisks (#781). Unlike Dedup/Steering
+it applies to every fixture and is never `—`; unlike Numbers/Reverted it
+counts toward `Aggregate`, because there is no guardrail forcing it to
+~100% by construction the way #778 does for number preservation.
 
 The dedup column is `—` for non-redundant fixtures (the criterion
 doesn't apply); the aggregate's dedup rate is computed over `redundant`

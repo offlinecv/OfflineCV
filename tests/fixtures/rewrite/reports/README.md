@@ -184,6 +184,25 @@ here: the current strip order exists to protect the `*Foo.*` italics case,
 so the reorder needs its own regression test rather than riding along on a
 reports commit.
 
+## The committed reports predate the No-markdown column (#805)
+
+Same situation as the Steering column above, one column later. Neither the
+**2026-06-23** nor the **2026-08-07** reports carry a `No-markdown` column —
+`noResidualMarkdown` and `noResidualMarkdownRate` arrived with #805, after
+both runs. Their absence of the column is an artifact of when they were
+run, not a finding, and they are not evidence about residual markdown in
+either direction — including the 19-of-24 Gemma `terse` anomaly documented
+above, which a human found by reading `perBullet[].text` by hand precisely
+because no criterion at the time would have surfaced it.
+
+Read the anomaly's own numbers with this in mind: the `Numbers` and
+`Aggregate` columns on those Gemma `terse` rows describe a run that scored
+literal `**` output as a full `noPreambleLeak` pass, because that is what
+`noPreambleLeak` measures. A future run with the new column would show that
+class of defect as a `No-markdown: fail` instead — but no run committed here
+has been scored that way, so `No-markdown` reads as if it had never been
+measured, not as if it passed.
+
 ### How to audit the Steering number yourself
 
 Unlike the aggregate rates, this one is checkable from the committed file.

@@ -22,6 +22,7 @@ function passingRecord(modelId: string, variantId: string, fixtureId: string): R
       noPreambleLeak: true,
       dedupEffective: null,
   steeringAdherence: null,
+      noResidualMarkdown: true,
       judgeCoherence: null,
       perBullet: [],
       droppedNumbers: [],
@@ -56,6 +57,7 @@ const sampleReport: EvalReport = {
       actionVerbRate: 1,
       lengthSanityRate: 1,
       noPreambleLeakRate: 1,
+      noResidualMarkdownRate: 1,
       dedupEffectiveRate: null,
   steeringAdherenceRate: null,
       judgeMean: null,
@@ -94,6 +96,35 @@ describe("renderMarkdownReport", () => {
     const md = renderMarkdownReport(sampleReport);
     // The aggregate row's dedup + judge columns should render `—`.
     expect(md).toMatch(/\| — \| — \| \*\*100%\*\* \|/);
+  });
+
+  it("renders a No-markdown column in the aggregate table (#805)", () => {
+    const md = renderMarkdownReport(sampleReport);
+    expect(md).toContain(
+      "| Model | Variant | Numbers | Reverted | One-line | Verb | Length | No-preamble | No-markdown | Dedup | Steering | Judge | **Aggregate** |",
+    );
+    // Unlike Dedup/Steering, this criterion is never `null`, so it always
+    // renders a percentage — never an em dash — immediately before them.
+    expect(md).toContain("| 100% | — | — | — | **100%** |");
+  });
+
+  it("renders a fail in the per-cell Markdown column when residual markdown survived", () => {
+    const markdownReport: EvalReport = {
+      ...sampleReport,
+      records: [
+        {
+          ...passingRecord("Qwen2.5-1.5B-Instruct-q4f16_1-MLC", "baseline", "fx-weak"),
+          rubric: {
+            ...passingRecord("M", "V", "F").rubric,
+            noResidualMarkdown: false,
+          },
+        },
+      ],
+      aggregates: [{ ...sampleReport.aggregates[0]!, noResidualMarkdownRate: 0 }],
+    };
+    const md = renderMarkdownReport(markdownReport);
+    expect(md).toContain("| Preamble | Markdown | Dedup |");
+    expect(md).toMatch(/\| PASS \| fail \| — \|/);
   });
 
   it("renders the Reverted column with the tokens the gate refused to lose (#778)", () => {

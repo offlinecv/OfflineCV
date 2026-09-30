@@ -210,6 +210,7 @@ describe("scoreRubric — empty output (model returned nothing parseable)", () =
     // The non-bullet-dependent criteria still report honestly.
     expect(r.numbersPreserved).toBe(true); // input had no numeric tokens
     expect(r.noPreambleLeak).toBe(true); // raw was empty
+    expect(r.noResidualMarkdown).toBe(true); // no bullets to carry markdown
   });
 });
 
@@ -222,8 +223,77 @@ describe("emptyRubricForError", () => {
     expect(r.noPreambleLeak).toBe(false);
     expect(r.oneLinePerBullet).toBe(false);
     expect(r.dedupEffective).toBeNull();
+    expect(r.noResidualMarkdown).toBe(false);
     expect(r.judgeCoherence).toBeNull();
     expect(r.perBullet).toEqual([]);
+  });
+});
+
+// ── No residual markdown (#805) ───────────────────────────────────────────
+
+describe("scoreRubric — noResidualMarkdown", () => {
+  const input = ["Led the migration of the billing platform across 12 markets."];
+
+  it("scores FALSE on the exact Gemma `terse` shape from the 2026-08-07 reports", () => {
+    // #781: the leading-`**Verb**` strip ran before the list-marker strip, so
+    // a marker shielded the bold and this literal `**` reached the user's
+    // downloaded PDF as asterisks while `noPreambleLeak` scored PASS.
+    const r = scoreRubric({
+      input,
+      output: out(["**Led** the migration of the billing platform across 12 markets."]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(false);
+  });
+
+  it("scores TRUE on the same bullet after the #781 fix stripped the bold", () => {
+    const r = scoreRubric({
+      input,
+      output: out(["Led the migration of the billing platform across 12 markets."]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(true);
+  });
+
+  it("fails the whole record when only ONE of several bullets carries markdown", () => {
+    // All-or-nothing per record, like steeringAdherence — not a rate over
+    // bullets.
+    const r = scoreRubric({
+      input: ["A", "B"],
+      output: out([
+        "Led the migration of the billing platform across 12 markets.",
+        "**Cut** p99 latency 40% on the write path for the checkout service.",
+      ]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(false);
+  });
+
+  it("does NOT flag legitimate résumé content with asterisks or hashes", () => {
+    // #805 decision 1: only a PAIRED `**…**` counts. `C*`, `snake_case`, `#1`,
+    // a lone `*`, and an unpaired `**` are real résumé content, not markdown.
+    const r = scoreRubric({
+      input: ["Worked on C++ and Python."],
+      output: out([
+        "Migrated the C++ service to a snake_case config schema, ranked #1 in the region.",
+        "Cut checkout latency 40%* on the write path across 3 regions.",
+        "Grew ARR 40%** on the strength of the paywall redesign across teams.",
+      ]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(true);
+  });
+
+  it("is vacuously true when there are no bullets to carry markdown", () => {
+    // No per-bullet quality claim to make — mirrors `noPreambleLeak`'s shape,
+    // not `oneLinePerBullet`'s. `outputBulletCount === 0` already fails those
+    // other criteria.
+    const r = scoreRubric({
+      input: ["A"],
+      output: out([]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(true);
   });
 });
 

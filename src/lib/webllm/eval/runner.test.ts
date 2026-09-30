@@ -270,6 +270,37 @@ describe("runEval", () => {
     expect(report.records[0]!.revertedNumbers).toEqual([]);
   });
 
+  it("computes noResidualMarkdownRate and folds it into the composite (#805)", async () => {
+    const fx = fixture("f", "weak", ["Worked on X."]);
+    const clean = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({
+        "M|V|f": {
+          bullets: ["Led the migration of the billing platform across 12 markets."],
+          raw: "Led the migration of the billing platform across 12 markets.",
+        },
+      }),
+    });
+    const markdown = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({
+        "M|V|f": {
+          bullets: ["**Led** the migration of the billing platform across 12 markets."],
+          raw: "**Led** the migration of the billing platform across 12 markets.",
+        },
+      }),
+    });
+    expect(clean.aggregates[0]!.noResidualMarkdownRate).toBe(1);
+    expect(markdown.aggregates[0]!.noResidualMarkdownRate).toBe(0);
+    expect(markdown.aggregates[0]!.aggregateScore).toBeLessThan(
+      clean.aggregates[0]!.aggregateScore,
+    );
+  });
+
   it("invokes onProgress once per cell with running counts", async () => {
     const fx = fixture("f", "weak", ["W"]);
     const good: RawRewriteOutput = {
