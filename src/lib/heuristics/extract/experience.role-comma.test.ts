@@ -191,4 +191,29 @@ describe("a delimiter header whose leading cell hides a 'Title, Company' comma (
     expect(roles.length).toBeGreaterThanOrEqual(1);
     expect(roles[0].title).toBe("Sr. Engineering Manager");
   });
+
+  it("recovers a 3-part 'City, Region, Country' trailing cell instead of surfacing the city as company (#1125)", () => {
+    // Pre-fix: `stripLocationSuffix`'s Pass E could only peel the trailing
+    // "India", so `resolveBareLocationString` didn't recognize the WHOLE team
+    // cell as a location and `rescueTeamLocation`'s rotate promoted the
+    // "Bengaluru, KA" remainder to `company`, demoting the real employer to
+    // `team`. Extending the whole-string bare-location predicate to the 3-part
+    // international shape lets the correct company (already split off by
+    // `splitRoleComma`) stand, with the untouched cell recovered whole as
+    // `location`.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Data Analyst, Northwind Retail Co. | Bengaluru, KA, India",
+        fontSize: 11,
+      },
+      { text: "March 2021 - Present", fontSize: 11 },
+      { text: "• Built the retail demand model.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Data Analyst");
+    expect(roles[0].company).toBe("Northwind Retail Co.");
+    expect(roles[0].location).toBe("Bengaluru, KA, India");
+    expect(roles[0].team ?? "").not.toMatch(/Northwind/);
+  });
 });
