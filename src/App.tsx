@@ -16,7 +16,6 @@ import { AuthoringResume } from "./components/features/AuthoringResume.tsx";
 import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
-import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionBar.tsx";
 import { ExportDialog } from "./components/features/ExportDialog.tsx";
 import { ResumeChooserDialog } from "./components/features/ResumeChooserDialog.tsx";
 import { FeedbackDialog } from "./components/features/FeedbackDialog.tsx";
@@ -724,19 +723,6 @@ export default function App() {
                 onOpenFeedback={feedback.openDialog}
               />
             </FeedbackNudgeContext.Provider>
-            {/* Hand the parse to the capture extension (#620) — self-hides when
-                no extension answers a probe, so it costs nothing on the visit
-                of everyone who runs none. `recovery.activeResult`, on the same
-                terms as every other consumer: this ships the résumé OUT of the
-                page, so a pre-recovery parse here would have the extension rate
-                every captured posting against the fields the parser got wrong,
-                with nothing on screen to reveal it. Same shape `departToJobs`
-                hands `/jobs/`, and now the same value; the file name becomes
-                the label the extension's panel shows beside its rating. */}
-            <ShareWithExtensionBar
-              parsed={recovery.activeResult.canonical.fields}
-              fileName={state.fileName}
-            />
           </>
         )}
 

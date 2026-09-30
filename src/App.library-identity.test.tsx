@@ -161,9 +161,6 @@ vi.mock("./components/Result.tsx", () => ({
       "type something",
     ),
 }));
-vi.mock("./components/features/ShareWithExtensionBar.tsx", () => ({
-  ShareWithExtensionBar: () => null,
-}));
 vi.mock("./components/features/ExportDialog.tsx", () => ({
   ExportDialog: () => null,
 }));

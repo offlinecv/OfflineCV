@@ -127,9 +127,6 @@ vi.mock("./hooks/useAutoRestoreResume.ts", () => ({
 vi.mock("./components/Result.tsx", () => ({
   Result: () => createElement("div", null, "result"),
 }));
-vi.mock("./components/features/ShareWithExtensionBar.tsx", () => ({
-  ShareWithExtensionBar: () => null,
-}));
 
 import App from "./App.tsx";
 

@@ -172,18 +172,6 @@ vi.mock("./components/Result.tsx", () => ({
       ),
     ]),
 }));
-// Stubbed down to the one prop under test — the fields it would hand the
-// browser extension. The real component self-hides unless an extension answers
-// a probe, and its own behaviour is covered in its own file.
-vi.mock("./components/features/ShareWithExtensionBar.tsx", () => ({
-  ShareWithExtensionBar: ({ parsed }: { parsed: { experience: { title?: string }[] } }) =>
-    createElement(
-      "div",
-      { "data-testid": "extension-bar" },
-      parsed.experience.map((e) => e.title).join(","),
-    ),
-}));
-
 import App from "./App.tsx";
 import { readJobsHandoff } from "./lib/jobs-handoff.ts";
 import { readDepartureMarker } from "./lib/nav-return.ts";
@@ -314,18 +302,6 @@ describe("App — the résumé `/` hands to `/jobs/`", () => {
     expect(handoff?.journeyKey).not.toBe(
       fingerprintParse(mergeLlmParse(HEURISTIC, LLM_PARSE).canonical.fields),
     );
-  });
-
-  it("hands the browser extension the RECOVERED fields", () => {
-    // The fourth consumer, and the one where a divergence is invisible: the
-    // extension rates captured postings in its own side panel, off the page. A
-    // pre-recovery profile there would rate every posting against the fields
-    // the parser got wrong with nothing on screen to say so.
-    const el = render();
-    const bar = () => el.querySelector('[data-testid="extension-bar"]')?.textContent;
-    expect(bar()).toBe(HEURISTIC_TITLE);
-    runRecovery(el);
-    expect(bar()).toBe(RECOVERED_TITLE);
   });
 
   it("saves the flattened edit, not the display result, when no recovery ran (#1022)", async () => {
