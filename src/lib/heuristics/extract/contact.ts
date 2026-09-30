@@ -3,8 +3,8 @@
 
 import type { PdfLine, PdfSection } from "../sections.ts";
 import type { PdfLinkAnnotation } from "../types.ts";
-import type { ProfileLink } from "../../score/types.ts";
-import { profilesFromUrls } from "../../contact/profile-registry.ts";
+import type { LegacyLinkKey, ProfileLink } from "../../score/types.ts";
+import { profileForLegacySlot } from "../../contact/profile-registry.ts";
 import {
   LINKEDIN_NONPROFILE_RE,
   normalizeUrl,
@@ -34,20 +34,30 @@ export interface ContactExtractionResult {
   /** libphonenumber isValid() result for the extracted phone. Undefined when
    *  no phone was found or the caller did not supply validity signal. */
   phoneIsValid?: boolean;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"linkedin_url"`. Read `profiles` directly for new code. */
   linkedin_url?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"github_url"`. Read `profiles` directly for new code. */
   github_url?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"portfolio_url"`. Read `profiles` directly for new code. */
   portfolio_url?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"website_url"`. Read `profiles` directly for new code. */
   website_url?: string;
   location?: string;
   /** Work-authorization statement (#792), verbatim, read off the header contact
    *  line. Profile-band only — see the doc-comment on `extractContact`. */
   work_authorization?: string;
   /**
-   * Classified contact links (#335), additive. Built from the four legacy
-   * `*_url` values above in their fixed precedence order
-   * `[linkedin, github, portfolio, website]`, so this mirrors — never
-   * overrides — the legacy keys, keeping scoring and every corpus snapshot
-   * byte-for-byte unchanged this phase. Empty when no link was detected.
+   * Classified contact links (#335), now the CANONICAL data (#422): built
+   * first, in the fixed four-slot precedence order
+   * `[linkedin, github, portfolio, website]`, each primary entry stamped with
+   * the `legacyKey` it fills and that slot's confidence. The four deprecated
+   * `*_url` fields above are then DERIVED from this list — the entry whose
+   * `legacyKey` matches — rather than the reverse. Empty when no link was
+   * detected.
    */
   profiles: ProfileLink[];
   /** Per-field confidence for the cascade's field-confidence map. */
@@ -629,26 +639,57 @@ export function extractContact(
   ].filter((s): s is string => s !== undefined);
   const consumedLines = findConsumedLines(allLines, promotedSlugs);
 
-  // Additive `profiles[]` (#335): classify the four legacy link values in their
-  // fixed precedence order. The legacy keys below are UNCHANGED — `profiles`
-  // mirrors them, so scoring and every corpus snapshot stay byte-for-byte
-  // identical this phase. `normalizeUrl` is applied inside `classifyProfile`,
-  // matching the legacy keys' own `normalizeUrl(...)` wrapping.
-  const profiles = profilesFromUrls([
-    linkedin.value,
-    github.value,
-    portfolio.value,
-    website.value,
-  ]);
+  // Canonical `profiles[]` (#422): classify each of the four slots' picked
+  // values into its PRIMARY `ProfileLink`, in the same fixed precedence order
+  // `[linkedin, github, portfolio, website]`, stamping each with the
+  // `legacyKey` it fills and that slot's own already-computed confidence.
+  // The four deprecated `*_url` fields below are DERIVED from this list — the
+  // entry whose `legacyKey` matches — rather than the reverse, so extraction
+  // now builds `profiles[]` first and the legacy keys are a read-compat
+  // projection of it. `profileForLegacySlot` applies the same `normalizeUrl`
+  // the legacy keys used to apply directly, so this stays byte-identical.
+  const legacySlots: readonly {
+    key: LegacyLinkKey;
+    value: string | undefined;
+    confidence: number;
+  }[] = [
+    { key: "linkedin_url", value: linkedin.value, confidence: linkedin.confidence },
+    { key: "github_url", value: github.value, confidence: github.confidence },
+    { key: "portfolio_url", value: portfolio.value, confidence: portfolio.confidence },
+    { key: "website_url", value: website.value, confidence: website.confidence },
+  ];
+  // Dedupe by (legacyKey, slug) — NOT slug alone. A host-agnostic `/in/<handle>`
+  // redirect (`https://github.com/in/sample`) can satisfy both the LinkedIn and
+  // GitHub annotation predicates above, so `linkedin.value` and `github.value`
+  // land on the identical URL. Deduping by slug alone would keep only the first
+  // slot's entry and drop the other — `legacyUrlFor` would then return
+  // `undefined` for the dropped key while its `confidence` entry below stays
+  // non-zero, an inconsistent pair. Keying on the slot too preserves one entry
+  // PER legacy field, matching the pre-#422 behaviour where the four `*_url`
+  // fields were populated independently (review on #1138).
+  const profiles: ProfileLink[] = [];
+  const seenProfileSlots = new Set<string>();
+  for (const slot of legacySlots) {
+    if (!slot.value) continue;
+    const profile = profileForLegacySlot(slot.value, slot.key, slot.confidence);
+    if (!profile) continue;
+    const slug = urlSlug(profile.url) ?? profile.url.toLowerCase();
+    const profileSlot = `${slot.key}:${slug}`;
+    if (seenProfileSlots.has(profileSlot)) continue;
+    seenProfileSlots.add(profileSlot);
+    profiles.push(profile);
+  }
+  const legacyUrlFor = (key: LegacyLinkKey): string | undefined =>
+    profiles.find((p) => p.legacyKey === key)?.url;
 
   return {
     email: primary.email ?? fallback.email,
     phone: primary.phone ?? fallback.phone,
     phoneIsValid: primary.phone ? primary.phoneIsValid : fallback.phoneIsValid,
-    linkedin_url: normalizeUrl(linkedin.value),
-    github_url: normalizeUrl(github.value),
-    portfolio_url: normalizeUrl(portfolio.value),
-    website_url: normalizeUrl(website.value),
+    linkedin_url: legacyUrlFor("linkedin_url"),
+    github_url: legacyUrlFor("github_url"),
+    portfolio_url: legacyUrlFor("portfolio_url"),
+    website_url: legacyUrlFor("website_url"),
     profiles,
     // No fallback for location — see comment above. Work authorization is
     // banded the same way and for the same reason (#792): a right-to-work

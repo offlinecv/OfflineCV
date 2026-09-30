@@ -18,7 +18,7 @@
  * two modules importing each other (#423).
  */
 
-import type { ProfileLink } from "../score/types.ts";
+import type { LegacyLinkKey, ProfileLink } from "../score/types.ts";
 import {
   normalizeUrl,
   urlSlug,
@@ -190,4 +190,36 @@ export function profilesFromUrls(
     out.push(profile);
   }
   return out;
+}
+
+/**
+ * Classify one legacy `*_url` slot's raw value into its PRIMARY `ProfileLink`
+ * (#422), stamping `legacyKey` and the slot's own confidence so the entry
+ * reproduces that slot's pre-consolidation semantics exactly — this is what
+ * lets `deriveContactProfiles` / the 0.5 confidence floor keep working
+ * unchanged once extraction stops mirroring and starts deriving.
+ *
+ * A malformed-but-present URL is never dropped just because
+ * {@link classifyProfile} can't classify its host: the entry falls back to
+ * `{ network: url, kind: "other" }` on the slot's own normalized URL, the same
+ * fallback `deriveContactProfiles` applies for a legacy slot it can't parse.
+ * Only `normalizeUrl` failing outright (empty input, or input that strips down
+ * to nothing) drops the slot — matching the legacy getter's own
+ * `normalizeUrl(...)` gate.
+ */
+export function profileForLegacySlot(
+  rawUrl: string,
+  legacyKey: LegacyLinkKey,
+  confidence: number,
+): ProfileLink | undefined {
+  const url = normalizeUrl(rawUrl);
+  if (!url) return undefined;
+  const classified = classifyProfile(rawUrl);
+  return {
+    url: classified?.url ?? url,
+    network: classified?.network ?? url,
+    kind: classified?.kind ?? "other",
+    legacyKey,
+    confidence,
+  };
 }

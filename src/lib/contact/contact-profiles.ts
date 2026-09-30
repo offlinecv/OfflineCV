@@ -94,6 +94,33 @@ export function deriveContactProfiles(
   return out;
 }
 
+/**
+ * Collapse `ProfileLink`s that resolve to the same slug, keeping the first
+ * occurrence. `deriveContactProfiles`'s own legacy loop deliberately does NOT
+ * do this itself — `score.ts` looks up `primaryProfileFor(…, "github_url")`
+ * and `primaryProfileFor(…, "linkedin_url")` independently, so a legacy entry
+ * must stay addressable by ITS key even when it shares a URL with another
+ * slot (see the byte-identical-scoring invariant above, and the parallel fix
+ * in `extract/contact.ts` for why one slot's dedup can't erase another's).
+ * A DISPLAY/export consumer has no such per-key lookup and must not render
+ * the same link twice just because two legacy slots (or a legacy slot and an
+ * extra) landed on the same URL — callers building a list for the UI or an
+ * export should run the derived list through this first (review on #1138).
+ */
+export function dedupeProfilesBySlug(
+  profiles: readonly ProfileLink[],
+): ProfileLink[] {
+  const out: ProfileLink[] = [];
+  const seen = new Set<string>();
+  for (const profile of profiles) {
+    const slug = slugOf(profile.url);
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    out.push(profile);
+  }
+  return out;
+}
+
 /** The confidence floor a contact link must clear to be credited/displayed —
  *  the same 0.5 floor the scorer + contact display applied to the legacy slots
  *  before #427 (`ANON_CONTACT_CONFIDENCE_FLOOR` / `CONTACT_DISPLAY_CONFIDENCE_FLOOR`). */
