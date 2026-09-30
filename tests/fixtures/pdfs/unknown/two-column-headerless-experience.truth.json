@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #848. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "CASEY MORGAN",
+    "email": "casey.morgan@example.com",
+    "phone": "(312) 555-0157",
+    "location": "Chicago, IL"
+  },
+  "experience": [
+    {
+      "title": "Senior Support Engineer",
+      "company": "Meridian Health",
+      "dates": "Feb 2021 - Present"
+    },
+    {
+      "title": "Support Engineer",
+      "company": "Talltree Software",
+      "dates": "Jul 2018 - Jan 2021"
+    },
+    {
+      "title": "Help Desk Analyst",
+      "company": "Brookford Retail",
+      "dates": "Aug 2016 - Jun 2018"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.A. in Information Systems",
+      "institution": "Lakeshore State University"
+    }
+  ],
+  "skills": ["Python", "React", "AWS", "PostgreSQL", "Docker", "Kubernetes", "Zendesk"],
+  "knownWrong": {
+    "experience.title": {
+      "issue": 848,
+      "status": "open",
+      "note": "recoverHeaderlessExperience (sections.ts) only fires on singleColumn; this fixture is two-column, so no `experience` section is ever routed and all three roles are dropped whole."
+    },
+    "experience.company": {
+      "issue": 848,
+      "status": "open",
+      "note": "Same drop as experience.title — the work history carries no recognized header on a two-column page, so recoverHeaderlessExperience's singleColumn-only scoping leaves it unrecovered."
+    },
+    "experience.dates": {
+      "issue": 848,
+      "status": "open",
+      "note": "Same drop as experience.title — the work history carries no recognized header on a two-column page, so recoverHeaderlessExperience's singleColumn-only scoping leaves it unrecovered."
+    }
+  }
+}
