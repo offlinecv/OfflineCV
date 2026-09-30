@@ -688,6 +688,119 @@ describe("computeAnonymousAtsScore", () => {
       expect(result.bullets!.every((b) => b.hasMetric)).toBe(true);
     });
 
+    it("treats ⁃ (U+2043 hyphen bullet) as a bullet marker (#915)", () => {
+      // The parser has always segmented a `⁃`-bulleted Experience entry
+      // correctly (line-primitives.ts's BULLET_CLASS included it); before
+      // #915 the scorer's BULLET_MARKER_RE did not, so these bullets were
+      // silently dropped from the Specificity/Structure pool.
+      const hyphenBulletGlyph = [
+        "⁃ Led migration of 3 microservices reducing latency by 40%",
+        "⁃ Built CI pipeline cutting deploy time from 45 to 8 minutes",
+        "⁃ Reduced infrastructure cost by 35% through right-sizing",
+        "⁃ Drove adoption of typed APIs across 12 backend services",
+      ].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: hyphenBulletGlyph }),
+      );
+      expect(result.bullets).toHaveLength(4);
+      expect(result.bullets!.every((b) => b.hasMetric)).toBe(true);
+    });
+
+    it("treats — (em dash) as a bullet marker (#915)", () => {
+      // Same gap as the ⁃ case above: a parser bullet the pre-#915 scorer
+      // silently skipped.
+      const emDashBulletGlyph = [
+        "— Led migration of 3 microservices reducing latency by 40%",
+        "— Built CI pipeline cutting deploy time from 45 to 8 minutes",
+        "— Reduced infrastructure cost by 35% through right-sizing",
+        "— Drove adoption of typed APIs across 12 backend services",
+      ].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: emDashBulletGlyph }),
+      );
+      expect(result.bullets).toHaveLength(4);
+      expect(result.bullets!.every((b) => b.hasMetric)).toBe(true);
+    });
+
+    it("falls back to prose pooling when the experience section's only marker hit is a wrapped-header dash artifact (review on #915)", () => {
+      // A header that wraps right before an em dash ("Senior Engineer" /
+      // "— Acme Corp") produces exactly ONE dash-marked "bullet" in the
+      // experience section — not a real glyph-bulleted list. The old gate
+      // treated any non-zero hit as "already glyph-bulleted" and permanently
+      // skipped the #365 prose fallback, so a résumé whose real bullets carry
+      // no marker at all lost every one of them from the Specificity/
+      // Structure pool (measured on a real fixture: 94 -> 24 overall just
+      // from this wrap). The fix treats a SINGLE dash-marked hit as "no
+      // glyph bullets" (a lone non-dash bullet, or 2+ dash bullets, are
+      // unaffected — see extractExperienceSectionBullets), so the fallback
+      // still runs here.
+      const proseBullets = [
+        "Led migration of 3 microservices reducing latency by 40%.",
+        "Managed a team of 5 engineers shipping weekly releases.",
+        "Reduced infrastructure cost by 35% through right-sizing.",
+        "Increased conversion rate by 22% through an experimentation rollout.",
+        "Drove adoption of typed APIs across 12 backend services.",
+      ];
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({
+            experience: ["Senior Engineer", "— Acme Corp", ...proseBullets],
+          }),
+          parsed: {
+            experience: [
+              {
+                title: "Senior Engineer",
+                company: "Acme Corp",
+                start_date: "Jan 2020",
+                description: proseBullets.join("\n"),
+              },
+            ],
+          },
+        }),
+      );
+      // Only the dash artifact ("Acme Corp") would survive under the old
+      // gate; the fix recovers all 5 real, marker-less bullets alongside it.
+      expect(result.bullets!.length).toBeGreaterThanOrEqual(5);
+      expect(result.specificity.gradable).toBe(true);
+      expect(result.specificity.metricBullets).toBeGreaterThanOrEqual(5);
+      // Second review finding (#1137): `extractBulletsFromSections` used to
+      // pool the experience section ungated regardless of the gate above, so
+      // the "Acme Corp" artifact the gate correctly identified as not a real
+      // bullet stayed in the scored pool alongside the 5 recovered prose
+      // bullets. It must be gone now that experience is sourced solely from
+      // the gated helper.
+      expect(result.bullets!.map((b) => b.text)).not.toContain("Acme Corp");
+      expect(result.bullets!.length).toBe(5);
+    });
+
+    it("does not double-count a genuinely single dash-bulleted role (#1137 review)", () => {
+      // Unlike the wrapped-header case above, this experience entry really
+      // does have exactly one dash-marked bullet — the gate can't tell the
+      // two apart by design (a lone dash hit isn't reliable evidence either
+      // way), so it falls back to `poolExperienceDescriptions`, which
+      // re-derives the same bullet from the role's `description`. Before the
+      // fix, the ungated `extractBulletsFromSections` ALSO kept its copy of
+      // the dash-marked line, so the single real bullet was pooled twice.
+      const bulletText =
+        "Led migration of 3 microservices reducing latency by 40%.";
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({ experience: [`- ${bulletText}`] }),
+          parsed: {
+            experience: [
+              {
+                title: "Senior Engineer",
+                company: "Acme Corp",
+                start_date: "Jan 2020",
+                description: bulletText,
+              },
+            ],
+          },
+        }),
+      );
+      expect(result.bullets!.map((b) => b.text)).toEqual([bulletText]);
+    });
+
     it("preserves the same bullet pool the dimension scoring uses", () => {
       const result = computeAnonymousAtsScore(makeAnonInput());
       // The totalBullets reported by dimensions must match the bullets-array length.
@@ -732,8 +845,18 @@ describe("computeAnonymousAtsScore", () => {
     it("the per-bullet badge's wordCount matches countWords for the same bullet", () => {
       const emDashBullet =
         "Owned the surface — a 50-engineer org — across 3 sites and teams";
+      // A single dash-marked bullet in the experience section is exactly the
+      // shape `extractExperienceSectionBullets`'s #365 gate treats as "no
+      // glyph bullets" (review on #915) — real parser output mirrors that
+      // same line into the role's `description` (entry-blocks.ts), which is
+      // what the #365 fallback then recovers it from, so set it here too.
       const result = computeAnonymousAtsScore(
-        makeAnonInput({ rawText: `- ${emDashBullet}` }),
+        makeAnonInput({
+          rawText: `- ${emDashBullet}`,
+          parsed: {
+            experience: [{ title: "Senior Engineer", company: "Acme", description: emDashBullet }],
+          },
+        }),
       );
       expect(result.bullets).toHaveLength(1);
       expect(result.bullets![0].wordCount).toBe(countWords(emDashBullet));

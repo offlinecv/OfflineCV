@@ -36,6 +36,7 @@
  */
 
 import type { PdfLine } from "./line-model.ts";
+import { bulletCharClass, MARKDOWN_BULLET_GLYPHS } from "./bullet-glyphs.ts";
 import { computeBodyFontSize } from "./line-assembly.ts";
 
 // ── Thresholds (tuneable) ───────────────────────────────────────────────────
@@ -62,9 +63,13 @@ const MIN_LINES = 3;
  * A leading run of any of these (followed by whitespace) is treated as a
  * bullet prefix. The trailing `\s+` is required — a line starting with `*`
  * but no space is not a bullet.
+ *
+ * Glyph set is {@link MARKDOWN_BULLET_GLYPHS} (`bullet-glyphs.ts`, #915) —
+ * this module's own membership, unchanged by that issue; it derives from
+ * the shared leaf now instead of a hand-typed literal, but recognises the
+ * same glyphs it always did.
  */
-const LEADING_BULLET_RE =
-  /^[\s]*[•▪◦‣·⁃∙●⬤▸▶*\-]\s+/;
+const LEADING_BULLET_RE = new RegExp(`^[\\s]*${bulletCharClass(MARKDOWN_BULLET_GLYPHS)}\\s+`);
 
 // ── Types ───────────────────────────────────────────────────────────────────
 

@@ -64,6 +64,12 @@ describe("normalizeBulletText", () => {
     expect(normalizeBulletText("* Built a pipeline")).toBe("built a pipeline");
   });
 
+  it("strips the Word PUA bullet (U+F0B7), adopted via SCORER_BULLET_GLYPHS (#915)", () => {
+    expect(normalizeBulletText(" Built a pipeline")).toBe(
+      "built a pipeline",
+    );
+  });
+
   it("strips numbered list prefixes", () => {
     expect(normalizeBulletText("1. Led the project")).toBe("led the project");
     expect(normalizeBulletText("2) Managed the team")).toBe("managed the team");

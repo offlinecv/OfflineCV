@@ -34,6 +34,7 @@ import type {
 } from "../heuristics/types.ts";
 import type { CanonicalResume } from "../heuristics/canonical.ts";
 import { toCanonicalResume } from "../heuristics/canonical.ts";
+import { bulletCharClass, SCORER_BULLET_GLYPHS } from "../heuristics/bullet-glyphs.ts";
 import type { BulletObservation } from "../score/score.ts";
 import type { HeuristicAchievement } from "../score/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
@@ -172,8 +173,13 @@ const CONTACT_KEYS: readonly (keyof ContactOverrides)[] = [
  *  it to `"5M raised"`. The trailing separator is `[ \t]+`, not `\s+` — a bare
  *  `\s+` lets a marker's separator swallow a `\n` and chain into a marker on
  *  the next line as if it stacked with the first, over-stripping a multi-line
- *  string in one pass. */
-const LEADING_MARKER_RE = /^(?:[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)])(?:[ \t]+|$))+/;
+ *  string in one pass. The glyph class is {@link SCORER_BULLET_GLYPHS}
+ *  (`heuristics/bullet-glyphs.ts`, #915) — kept identical to `score.ts`'s
+ *  `BULLET_MARKER_RE` and `group-bullets.ts`'s own `LEADING_MARKER_RE` by
+ *  construction. */
+const LEADING_MARKER_RE = new RegExp(
+  `^(?:[\\s ]*(?:${bulletCharClass(SCORER_BULLET_GLYPHS)}|\\d+[.)])(?:[ \\t]+|$))+`,
+);
 
 /**
  * Fold `contact` overrides into `nextParsed` in place. Empty string clears a

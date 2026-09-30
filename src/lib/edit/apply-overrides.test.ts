@@ -431,6 +431,31 @@ describe("applyOverrides", () => {
     );
   });
 
+  it("preserves a Word PUA bullet (U+F0B7) marker, adopted via SCORER_BULLET_GLYPHS (#915)", () => {
+    const rawText = " Led the migration effort";
+    const { rawText: outRaw } = applyOverrides(
+      {
+        parsed: {
+          ...baseParsed(),
+          experience: [
+            {
+              title: "Engineer",
+              company: "Acme",
+              description: "Led the migration effort",
+            },
+          ],
+        },
+        rawText,
+        sections: makeSections([" Led the migration effort"]),
+        observations: [obs(5, "Led the migration effort")],
+      },
+      {
+        bulletOverrides: { 5: "Led the migration of 12 services to k8s" },
+      },
+    );
+    expect(outRaw).toBe(" Led the migration of 12 services to k8s");
+  });
+
   it("edits a glyph+numbered stacked-marker line (\"• 1. …\") via a modern id key (#999)", () => {
     const obsText = "1. Led team of five engineers";
     const rawText = "• 1. Led team of five engineers";
