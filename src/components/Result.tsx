@@ -203,6 +203,7 @@ function ParsedCard({
     analysis.status.kind === "done"
       ? analysis.status.critique.bulletFindings
       : undefined,
+    activeResult.canonical.fieldConfidence.phone,
   );
 
   // Two-column layout warning (#356) — detected but previously never

@@ -47,13 +47,29 @@ const EDIT_CONTACT_HREF: SectionAnchor = `#${SECTION_IDS.contact}`;
  * naive `+ "s"` gets wrong — is testable without rendering a disclosure, and
  * so the caller stays a composition instead of a nest of ternaries.
  *
+ * `bulletPhrase`, when given, replaces the numeric "N bullets need attention"
+ * clause outright — the below-the-grading-floor case (#1023, D0), where
+ * `flaggedBullets` is 0 (no per-bullet steps exist to count) but there is
+ * still something to say about bullets. It is never merged into the "need
+ * attention" grammar built for the numeric case — "Add 2 more bullets need
+ * attention" does not parse — so a contact clause after it reads as a
+ * sibling fact, not a shared verb.
+ *
  * Returns null when nothing is flagged; the caller then shows the plain
  * targeting label rather than an empty callout.
  */
 export function formatTriageHeadline(
   flaggedBullets: number,
   missingContactCount: number,
+  bulletPhrase?: string,
 ): string | null {
+  if (bulletPhrase) {
+    if (missingContactCount === 0) return bulletPhrase;
+    const contactsMissing = `${missingContactCount} contact field${
+      missingContactCount === 1 ? "" : "s"
+    } missing`;
+    return `${bulletPhrase} · ${contactsMissing}`;
+  }
   const bullets = `${flaggedBullets} bullet${flaggedBullets === 1 ? "" : "s"}`;
   const contacts = `${missingContactCount} contact field${
     missingContactCount === 1 ? "" : "s"
@@ -71,12 +87,18 @@ export function formatTriageHeadline(
 function BulletSegment({
   steps,
   total,
+  belowFloor,
 }: {
   steps: readonly GuidanceItem[];
   total: number;
+  /** `bulletsBelowFloorItem` (#1023, D0) — the below-the-grading-floor step.
+   *  A critique finding is never gated by the floor (#1008), so `steps` can
+   *  be non-empty at the same time; when that happens both render, below-floor
+   *  phrase first — see this file's `TargetingTriageRowProps` doc. */
+  belowFloor?: GuidanceItem | null;
 }) {
   const flagged = steps.length;
-  if (flagged === 0) return null;
+  if (flagged === 0 && !belowFloor) return null;
 
   // Tallied from the steps' own issues, so a metric past the budget — which
   // Fix It does not ask for — is not counted here either (#913).
@@ -107,23 +129,33 @@ function BulletSegment({
 
   return (
     <span className="text-content-primary">
-      <span className="font-medium">
-        {flagged} of {total} bullet{total === 1 ? "" : "s"} need attention
-      </span>
-      {counts.length > 0 && (
-        <span className="text-content-secondary">
-          {" ("}
-          {counts.map((c, i) => (
-            <span key={c.key} className="tabular-nums">
-              {i > 0 && " · "}
-              <span className="font-semibold text-feedback-warning-text">
-                {c.n}
-              </span>{" "}
-              {c.label}
-            </span>
-          ))}
-          {")"}
+      {belowFloor && (
+        <span className="font-medium">
+          {belowFloor.summary}
+          {flagged > 0 && " · "}
         </span>
+      )}
+      {flagged > 0 && (
+        <>
+          <span className="font-medium">
+            {flagged} of {total} bullet{total === 1 ? "" : "s"} need attention
+          </span>
+          {counts.length > 0 && (
+            <span className="text-content-secondary">
+              {" ("}
+              {counts.map((c, i) => (
+                <span key={c.key} className="tabular-nums">
+                  {i > 0 && " · "}
+                  <span className="font-semibold text-feedback-warning-text">
+                    {c.n}
+                  </span>{" "}
+                  {c.label}
+                </span>
+              ))}
+              {")"}
+            </span>
+          )}
+        </>
       )}
     </span>
   );
@@ -161,6 +193,10 @@ interface TargetingTriageRowProps {
   contactMissing: ContactDisplayField[];
   hasBulletGap: boolean;
   hasContactGap: boolean;
+  /** `TargetingSection`'s `bulletsBelowFloor` — the single "add more bullets"
+   *  step (#1023, D0) that `BulletSegment` falls back to when `bulletSteps` is
+   *  empty for that reason rather than because every bullet passes. */
+  bulletsBelowFloor?: GuidanceItem | null;
 }
 
 export function TargetingTriageRow({
@@ -169,12 +205,17 @@ export function TargetingTriageRow({
   contactMissing,
   hasBulletGap,
   hasContactGap,
+  bulletsBelowFloor,
 }: TargetingTriageRowProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-border-light bg-surface-subtle px-3.5 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {hasBulletGap && (
-          <BulletSegment steps={bulletSteps} total={totalBullets} />
+          <BulletSegment
+            steps={bulletSteps}
+            total={totalBullets}
+            belowFloor={bulletsBelowFloor}
+          />
         )}
         {hasBulletGap && hasContactGap && (
           <span

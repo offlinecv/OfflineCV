@@ -320,11 +320,126 @@ describe("guidance.ts — score guidance generator (#810)", () => {
       ]);
     });
 
-    it("keeps every metric-less bullet while the dimension is ungraded", () => {
+    it("replaces every per-bullet metric ask with the single below-floor step once ungraded (#1023, D0)", () => {
       const bullets = [bullet(0, false), bullet(1, false)];
       const score = scoreWith(bullets);
       score.specificity.gradable = false;
-      expect(metricItems(score)).toHaveLength(2);
+      const items = metricItems(score);
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe("bullets-below-grading-floor");
+      expect(items[0].issues[0].title).toBe("Too few bullets to grade wording");
+    });
+  });
+
+  describe("below the grading floor, one 'add bullets' step replaces per-bullet steps (#1023, D0)", () => {
+    function bullet(text: string, index: number): BulletObservation {
+      return {
+        id: `${index}|${text.toLowerCase()}`,
+        text,
+        index,
+        hasMetric: false,
+        startsWithActionVerb: false,
+        wellFormedLength: false,
+        wordCount: 3,
+      };
+    }
+    function ungradedScore(bullets: BulletObservation[]): AnonymousAtsScore {
+      return createMockScore({
+        specificity: {
+          score: 0,
+          max: 40,
+          gradable: false,
+          metricBullets: 0,
+          totalBullets: bullets.length,
+        },
+        structure: {
+          score: 0,
+          max: 30,
+          gradable: false,
+          goodBullets: 0,
+          verbLedBullets: 0,
+          inWindowBullets: 0,
+          totalBullets: bullets.length,
+        },
+        completeness: { score: 20, max: 30, gradable: true, missing: [] },
+        bullets,
+      });
+    }
+    const parsed = {
+      experience: [{ title: "Dev", company: "Corp", description: "Shipped a thing" }],
+    };
+
+    it("interpolates the exact shortfall and the grading floor, never a bare 3", () => {
+      const bullets = [bullet("Shipped a thing", 0)];
+      const items = computeScoreGuidance(ungradedScore(bullets), parsed);
+      const floor = items.find((i) => i.id === "bullets-below-grading-floor")!;
+      expect(floor).toBeDefined();
+      expect(floor.targetType).toBe("section");
+      expect(floor.dimension).toBe("specificity");
+      expect(floor.dimensions).toEqual(["specificity", "structure"]);
+      expect(floor.issues[0].suggestion).toBe(
+        "Add at least 2 more bullets to your experience, projects, or achievements. Wording checks start at 3 bullets.",
+      );
+      expect(floor.summary).toBe("Add 2 more bullets");
+      // No heuristic per-bullet steps survive below the floor.
+      expect(items.some((i) => i.targetType === "bullet")).toBe(false);
+    });
+
+    it("singularizes 'bullet' when exactly one more is needed", () => {
+      const bullets = [bullet("Shipped a thing", 0), bullet("Shipped another thing", 1)];
+      const items = computeScoreGuidance(ungradedScore(bullets), parsed);
+      const floor = items.find((i) => i.id === "bullets-below-grading-floor")!;
+      expect(floor.issues[0].suggestion).toBe(
+        "Add at least 1 more bullet to your experience, projects, or achievements. Wording checks start at 3 bullets.",
+      );
+      expect(floor.summary).toBe("Add 1 more bullet");
+    });
+
+    it("keeps a bullet's critique-only step even below the floor", () => {
+      const bullets = [bullet("Shipped a thing", 0)];
+      const items = computeScoreGuidance(ungradedScore(bullets), parsed, [
+        { bullet: "Shipped a thing", issue: "vague", suggestion: "Shipped a specific thing" },
+      ]);
+      const bulletStep = items.find((i) => i.targetType === "bullet");
+      expect(bulletStep).toBeDefined();
+      expect(bulletStep!.issues.map((i) => i.check)).toEqual(["critique"]);
+      // Both the floor step and the critique-only bullet step are present.
+      expect(items.some((i) => i.id === "bullets-below-grading-floor")).toBe(true);
+    });
+
+    it("does not stack the floor step on top of the 'no experience at all' step", () => {
+      const bullets: BulletObservation[] = [];
+      const score = ungradedScore(bullets);
+      score.completeness.missing = ["work experience"];
+      const items = computeScoreGuidance(score, {});
+      expect(items.some((i) => i.id === "bullets-below-grading-floor")).toBe(false);
+      expect(items.some((i) => i.id === "completeness-experience")).toBe(true);
+    });
+
+    it("still emits the floor step when only role dates are missing, not full experience", () => {
+      const bullets = [bullet("Shipped a thing", 0)];
+      const score = ungradedScore(bullets);
+      score.completeness.missing = ["role dates"];
+      const items = computeScoreGuidance(score, parsed);
+      expect(items.some((i) => i.id === "bullets-below-grading-floor")).toBe(true);
+    });
+
+    it("breadcrumbs to the real section_label heading, not a hardcoded 'Experience' (#1023, D4)", () => {
+      const bullets = [bullet("Organized weekly club meetings", 0)];
+      const score = ungradedScore(bullets);
+      const labelled = {
+        experience: [
+          {
+            title: "Club President",
+            company: "State University",
+            description: "Organized weekly club meetings",
+            section_label: "Leadership Experience",
+          },
+        ],
+      };
+      const items = computeScoreGuidance(score, labelled);
+      const floor = items.find((i) => i.id === "bullets-below-grading-floor")!;
+      expect(floor.location).toBe("Leadership Experience");
     });
   });
 
@@ -587,6 +702,235 @@ describe("guidance.ts — score guidance generator (#810)", () => {
       expect(
         paired.filter((i) => i.targetType === "bullet").map((i) => i.bulletId),
       ).toEqual([`1|${dup.toLowerCase()}`]);
+    });
+  });
+
+  describe("scanned layouts get no guidance at all (#1023, D1)", () => {
+    it("returns [] when score.layout.scanned, even with every field missing", () => {
+      const score = createMockScore({
+        completeness: {
+          score: 0,
+          max: 30,
+          gradable: true,
+          missing: ["name", "email", "phone", "location", "LinkedIn", "summary", "work experience", "education", "skills"],
+        },
+        layout: { triggers: ["scanned"], multiplier: 0, scanned: true },
+        bullets: [],
+      });
+      expect(computeScoreGuidance(score, {})).toEqual([]);
+    });
+  });
+
+  describe("contact fields get a reason-specific step, not a blind 'add it' (#1023, D2)", () => {
+    it("tells an absent phone apart from one that parsed with low confidence", () => {
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["phone"] },
+        bullets: [],
+      });
+      const absent = computeScoreGuidance(score, {});
+      const phoneAbsent = absent.find((i) => i.fieldName === "phone")!;
+      expect(phoneAbsent.issues[0].title).toBe("Phone number missing or incomplete");
+      expect(phoneAbsent.issues[0].suggestion).toContain("phone number with area code");
+
+      const lowConfidence = computeScoreGuidance(score, { phone: "555 0100" });
+      const phoneLowConf = lowConfidence.find((i) => i.fieldName === "phone")!;
+      expect(phoneLowConf.issues[0].title).toBe("Phone is hard to read");
+      expect(phoneLowConf.issues[0].suggestion).toBe(
+        "Put it on its own line as plain text so it reads cleanly.",
+      );
+      expect(phoneLowConf.summary).toBe("Make your phone easier to read");
+    });
+
+    it("tells an invalid-but-present phone apart from a low-confidence one", () => {
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["phone"] },
+        bullets: [],
+      });
+      const items = computeScoreGuidance(score, {
+        phone: "(312) 555-0123",
+        phoneIsValid: false,
+      });
+      const phoneItem = items.find((i) => i.fieldName === "phone")!;
+      expect(phoneItem.issues[0].title).toBe("Phone number may not be valid");
+      expect(phoneItem.issues[0].suggestion).toBe(
+        "Check the number — it does not read as a valid phone number.",
+      );
+      expect(phoneItem.summary).toBe("Check your phone number");
+    });
+
+    it("prefers low-confidence copy over invalid-phone copy when confidence actually failed", () => {
+      // score.ts only ever reaches its validity check once a field has
+      // cleared the confidence floor — a phone that failed on confidence and
+      // also happens to fail libphonenumber validation is a confidence miss,
+      // not a validity one, and must get the "hard to read" copy.
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["phone"] },
+        bullets: [],
+      });
+      const items = computeScoreGuidance(score, {
+        phone: "(312) 555-0123",
+        phoneIsValid: false,
+        phoneConfidence: 0.2,
+      });
+      const phoneItem = items.find((i) => i.fieldName === "phone")!;
+      expect(phoneItem.issues[0].title).toBe("Phone is hard to read");
+      expect(phoneItem.summary).toBe("Make your phone easier to read");
+    });
+
+    it("applies the same absent/low-confidence split to the other contact fields", () => {
+      const score = createMockScore({
+        completeness: {
+          score: 5,
+          max: 30,
+          gradable: true,
+          missing: ["name", "email", "location", "LinkedIn"],
+        },
+        bullets: [],
+      });
+      const items = computeScoreGuidance(score, {
+        full_name: "J",
+        email: "x@y.co",
+        location: "??",
+        linkedin_url: "in/x",
+      });
+      const titleFor = (fieldName: string) =>
+        items.find((i) => i.fieldName === fieldName)!.issues[0].title;
+      expect(titleFor("full_name")).toBe("Name is hard to read");
+      expect(titleFor("email")).toBe("Email is hard to read");
+      expect(titleFor("location")).toBe("Location is hard to read");
+      expect(titleFor("linkedin_url")).toBe("Professional profile is hard to read");
+    });
+
+    it("treats a confident github_url as satisfying the LinkedIn spec's low-confidence branch too", () => {
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["LinkedIn"] },
+        bullets: [],
+      });
+      const items = computeScoreGuidance(score, { github_url: "github.com/x" });
+      const profile = items.find((i) => i.fieldName === "linkedin_url")!;
+      expect(profile.issues[0].title).toBe("Professional profile is hard to read");
+    });
+
+    it("does not move any score value — guidance only reads the score, never writes it", () => {
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["phone"] },
+        bullets: [],
+      });
+      const before = JSON.parse(JSON.stringify(score));
+      computeScoreGuidance(score, { phone: "555 0100" });
+      expect(score).toEqual(before);
+    });
+  });
+
+  describe("a short-but-present summary is told to expand, not add (#1023, D3)", () => {
+    it("gives 'add' copy when the summary is absent", () => {
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["summary"] },
+        bullets: [],
+      });
+      const items = computeScoreGuidance(score, {});
+      const summaryItem = items.find((i) => i.id === "completeness-summary")!;
+      expect(summaryItem.issues[0].title).toBe("Summary missing or brief");
+      expect(summaryItem.issues[0].suggestion).toContain("Add a 2–3 sentence");
+      expect(summaryItem.summary).toBe("Add a professional summary");
+    });
+
+    it("gives 'expand' copy when a too-short summary is present", () => {
+      const score = createMockScore({
+        completeness: { score: 20, max: 30, gradable: true, missing: ["summary"] },
+        bullets: [],
+      });
+      const items = computeScoreGuidance(score, { summary: "Backend engineer." });
+      const summaryItem = items.find((i) => i.id === "completeness-summary")!;
+      expect(summaryItem.issues[0].title).toBe("Summary is brief");
+      expect(summaryItem.issues[0].suggestion).toContain("Expand your summary");
+      expect(summaryItem.summary).toBe("Expand your summary");
+    });
+  });
+
+  describe("the location breadcrumb resolves the real section_label heading (#1023, D4)", () => {
+    const bullet = (i: number, text: string): BulletObservation => ({
+      id: `${i}|${text.toLowerCase()}`,
+      text,
+      index: i,
+      hasMetric: false,
+      startsWithActionVerb: false,
+      wellFormedLength: false,
+      wordCount: 3,
+    });
+
+    it("names the second section_label group instead of hardcoding 'Experience'", () => {
+      const workText = "Shipped the platform migration";
+      const clubText = "Organized weekly club meetings";
+      const score = createMockScore({
+        completeness: { score: 25, max: 30, gradable: true, missing: [] },
+        bullets: [bullet(0, workText), bullet(1, clubText)],
+      });
+      const parsed = {
+        experience: [
+          {
+            title: "Engineer",
+            company: "Acme",
+            description: workText,
+            section_label: "Work Experience",
+          },
+          {
+            title: "Club President",
+            company: "State University",
+            description: clubText,
+            section_label: "Leadership Experience",
+          },
+        ],
+      };
+      const items = computeScoreGuidance(score, parsed);
+      const locations = items.filter((i) => i.targetType === "bullet").map((i) => i.location);
+      expect(locations).toEqual([
+        "Work Experience → Engineer — Acme → bullet 1",
+        "Leadership Experience → Club President — State University → bullet 1",
+      ]);
+    });
+
+    it("gives the unmatched tail run the section's top heading, not the last sub-heading", () => {
+      const workText = "Shipped the platform migration";
+      const clubText = "Organized weekly club meetings";
+      const otherText = "Volunteered at the annual food drive";
+      const score = createMockScore({
+        completeness: { score: 25, max: 30, gradable: true, missing: [] },
+        bullets: [bullet(0, workText), bullet(1, clubText), bullet(2, otherText)],
+      });
+      const parsed = {
+        experience: [
+          {
+            title: "Engineer",
+            company: "Acme",
+            description: workText,
+            section_label: "Work Experience",
+          },
+          {
+            title: "Club President",
+            company: "State University",
+            description: clubText,
+            section_label: "Leadership Experience",
+          },
+        ],
+      };
+      const items = computeScoreGuidance(score, parsed);
+      const otherItem = items.find((i) => i.id.includes("volunteered"))!;
+      expect(otherItem.location).toBe("Work Experience → Other bullets → bullet 1");
+    });
+
+    it("falls back to the plain 'Experience' label with no section_label anywhere (unchanged behaviour)", () => {
+      const text = "Shipped the platform migration";
+      const score = createMockScore({
+        completeness: { score: 25, max: 30, gradable: true, missing: [] },
+        bullets: [bullet(0, text)],
+      });
+      const parsed = {
+        experience: [{ title: "Engineer", company: "Acme", description: text }],
+      };
+      const items = computeScoreGuidance(score, parsed);
+      const bulletItem = items.find((i) => i.targetType === "bullet")!;
+      expect(bulletItem.location).toBe("Experience → Engineer — Acme → bullet 1");
     });
   });
 });

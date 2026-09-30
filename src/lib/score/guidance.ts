@@ -19,6 +19,7 @@
  */
 
 import {
+  ANON_MIN_BULLETS_TO_GRADE,
   BULLET_LENGTH_MAX_WORDS,
   BULLET_LENGTH_MIN_WORDS,
   COMPLETENESS_SKILLS_MIN_COUNT,
@@ -28,12 +29,14 @@ import {
 } from "./score.ts";
 import {
   buildEntryGroups,
+  computeExperienceHeadings,
   roleLabel,
   type AccomplishmentEntry,
   type BulletGroup,
 } from "./group-bullets.ts";
 import { matchCritiqueFindings } from "./critique-match.ts";
 import type { BulletFinding } from "../webllm/critique-resume.ts";
+import { CONTACT_DISPLAY_CONFIDENCE_FLOOR } from "../contact.ts";
 import { SECTION_IDS } from "../anchors.ts";
 import { firstUndatedRoleIndex } from "../edit/role-display.ts";
 
@@ -77,6 +80,19 @@ export interface ResumeStructureInput {
   full_name?: string;
   email?: string;
   phone?: string;
+  /** libphonenumber isValid() result (#1023) — plumbed straight from
+   *  `HeuristicParsedResume.phoneIsValid`, not re-derived, so a present-but-
+   *  invalid phone can be told apart from one that merely parsed with low
+   *  confidence without adding anything to the score object itself. */
+  phoneIsValid?: boolean;
+  /** `fieldConfidence.phone` (#1023) — the invalid-phone check only applies
+   *  once the field has cleared the confidence floor `score.ts` gates
+   *  presence on (`CONTACT_DISPLAY_CONFIDENCE_FLOOR`, the same value under a
+   *  separate name — see `contact-profiles.ts`'s note on the pair). Without
+   *  it, a low-confidence phone that also happens to fail libphonenumber
+   *  validation would get "check the number" copy instead of "hard to read",
+   *  even though `score.ts` flagged it for confidence, not validity. */
+  phoneConfidence?: number;
   location?: string;
   linkedin_url?: string;
   github_url?: string;
@@ -90,6 +106,11 @@ export interface ResumeStructureInput {
     end_date?: string;
     is_current?: boolean;
     description?: string;
+    /** Verbatim heading of the experience-category section this role came
+     *  from (#311) — see `ResumeExperience.section_label`. Threaded through so
+     *  the location breadcrumb can resolve the SAME heading `ExperienceSection`
+     *  renders instead of hardcoding "Experience" (#1023). */
+    section_label?: string;
   }>;
   projects?: AccomplishmentEntry[];
   /** The accomplishment buckets `ReconstructedResume` renders — the heuristic
@@ -136,15 +157,35 @@ interface CompletenessSpec {
   summary: string;
 }
 
-/** Contact fields, then the summary — the document sequence above Experience. */
-const LEADING_COMPLETENESS: readonly CompletenessSpec[] = [
+/**
+ * One contact-field completeness gap (#1023, D2). Unlike {@link CompletenessSpec}
+ * this carries the ABSENT-value copy only — {@link contactCompletenessItem}
+ * picks between it and the `low_confidence` / `invalid` copy from the D2 table
+ * depending on whether the field round-tripped through `parsed` non-empty.
+ */
+interface ContactSpec {
+  missingKey: string;
+  id: string;
+  location: string;
+  targetAnchor: string;
+  fieldName: "full_name" | "email" | "phone" | "location" | "linkedin_url";
+  /** Noun for the low-confidence "hard to read" / "easier to read" copy —
+   *  e.g. "Professional profile", not the internal `fieldName`. */
+  fieldLabel: string;
+  title: string;
+  suggestion: string;
+  summary: string;
+}
+
+/** Contact fields — the document sequence above Summary. */
+const CONTACT_COMPLETENESS: readonly ContactSpec[] = [
   {
     missingKey: "name",
     id: "completeness-contact-name",
     location: "Contact → Name",
     targetAnchor: contactFieldAnchorId("full_name"),
-    targetType: "contact_field",
     fieldName: "full_name",
+    fieldLabel: "Name",
     title: "Name not detected",
     suggestion: "Add your full name at the top of your resume.",
     summary: "Add your name",
@@ -154,8 +195,8 @@ const LEADING_COMPLETENESS: readonly CompletenessSpec[] = [
     id: "completeness-contact-email",
     location: "Contact → Email",
     targetAnchor: contactFieldAnchorId("email"),
-    targetType: "contact_field",
     fieldName: "email",
+    fieldLabel: "Email",
     title: "Email address missing",
     suggestion: "Add a professional email address for recruiters to contact you.",
     summary: "Add an email address",
@@ -165,8 +206,8 @@ const LEADING_COMPLETENESS: readonly CompletenessSpec[] = [
     id: "completeness-contact-phone",
     location: "Contact → Phone",
     targetAnchor: contactFieldAnchorId("phone"),
-    targetType: "contact_field",
     fieldName: "phone",
+    fieldLabel: "Phone",
     title: "Phone number missing or incomplete",
     suggestion: "Add a phone number with area code.",
     summary: "Add a valid phone number",
@@ -176,8 +217,8 @@ const LEADING_COMPLETENESS: readonly CompletenessSpec[] = [
     id: "completeness-contact-location",
     location: "Contact → Location",
     targetAnchor: contactFieldAnchorId("location"),
-    targetType: "contact_field",
     fieldName: "location",
+    fieldLabel: "Location",
     title: "Location missing",
     suggestion: "Add your city and state or country (e.g. 'San Francisco, CA' or 'Remote').",
     summary: "Add your location",
@@ -187,22 +228,11 @@ const LEADING_COMPLETENESS: readonly CompletenessSpec[] = [
     id: "completeness-contact-profile",
     location: "Contact → Professional profile",
     targetAnchor: contactFieldAnchorId("linkedin_url"),
-    targetType: "contact_field",
     fieldName: "linkedin_url",
+    fieldLabel: "Professional profile",
     title: "Professional profile missing",
     suggestion: "Add a LinkedIn or GitHub profile link.",
     summary: "Add a LinkedIn or GitHub profile",
-  },
-  {
-    missingKey: "summary",
-    id: "completeness-summary",
-    location: "Summary",
-    targetAnchor: SECTION_IDS.summary,
-    targetType: "section",
-    fieldName: "summary",
-    title: "Summary missing or brief",
-    suggestion: "Add a 2–3 sentence professional summary highlighting your core strengths and domain.",
-    summary: "Add a professional summary",
   },
 ];
 
@@ -250,6 +280,132 @@ function completenessItems(
   missing: ReadonlySet<string>,
 ): GuidanceItem[] {
   return specs.filter((spec) => missing.has(spec.missingKey)).map(completenessItem);
+}
+
+/** The value a contact spec's score.ts check reads, read here only to tell an
+ *  ABSENT field apart from one that round-tripped through the parse non-empty
+ *  (#1023) — never to change whether the field counts as complete, which stays
+ *  entirely score.ts's call. */
+function contactFieldValue(
+  fieldName: ContactSpec["fieldName"],
+  parsed: ResumeStructureInput,
+): string | undefined {
+  if (fieldName === "linkedin_url") {
+    // Same brand-neutral either/or the scorer applies (score.ts, the
+    // `linkedinPresent || githubSatisfies` branch).
+    return parsed.linkedin_url || parsed.github_url;
+  }
+  return parsed[fieldName];
+}
+
+type ContactReason = "absent" | "invalid" | "low_confidence";
+
+/**
+ * Why a contact spec's key is in `score.completeness.missing` (#1023, D2). A
+ * spec only fires once its check has already failed in `score.ts`; the only
+ * way a NON-empty value still failed there is a confidence floor or (phone
+ * only) a validity check — both already visible on `parsed` — so telling the
+ * three reasons apart needs no score-object change.
+ *
+ * The validity check is gated on `phoneConfidence` clearing the same floor
+ * `score.ts` gates presence on: `phoneIsValid` is computed independently of
+ * confidence (`extract/contact.ts`), so a garbled, low-confidence phone can
+ * be BOTH low-confidence and libphonenumber-invalid at once. `score.ts` only
+ * ever reaches its own validity check once the field is already `present`
+ * (confidence cleared) — so without this gate, a phone that failed on
+ * confidence would get "check the number" copy for a reason `score.ts`
+ * never actually evaluated. `phoneConfidence` is `undefined` when the caller
+ * has no confidence data at all — that is not "below floor", so this
+ * defaults to the invalid branch and preserves prior behaviour.
+ */
+function contactFieldReason(
+  spec: ContactSpec,
+  parsed: ResumeStructureInput,
+): ContactReason {
+  const value = contactFieldValue(spec.fieldName, parsed)?.trim();
+  if (!value) return "absent";
+  const belowConfidenceFloor =
+    parsed.phoneConfidence !== undefined &&
+    parsed.phoneConfidence < CONTACT_DISPLAY_CONFIDENCE_FLOOR;
+  if (spec.fieldName === "phone" && !belowConfidenceFloor && parsed.phoneIsValid === false) {
+    return "invalid";
+  }
+  return "low_confidence";
+}
+
+function contactCompletenessItem(
+  spec: ContactSpec,
+  parsed: ResumeStructureInput,
+): GuidanceItem {
+  const reason = contactFieldReason(spec, parsed);
+  const issue =
+    reason === "absent"
+      ? { title: spec.title, suggestion: spec.suggestion, summary: spec.summary }
+      : reason === "invalid"
+        ? {
+            title: "Phone number may not be valid",
+            suggestion: "Check the number — it does not read as a valid phone number.",
+            summary: "Check your phone number",
+          }
+        : {
+            title: `${spec.fieldLabel} is hard to read`,
+            suggestion: "Put it on its own line as plain text so it reads cleanly.",
+            summary: `Make your ${spec.fieldLabel.toLowerCase()} easier to read`,
+          };
+  return {
+    id: spec.id,
+    dimension: "completeness",
+    dimensions: ["completeness"],
+    location: spec.location,
+    targetAnchor: spec.targetAnchor,
+    targetType: "contact_field",
+    fieldName: spec.fieldName,
+    issues: [{ dimension: "completeness", title: issue.title, suggestion: issue.suggestion }],
+    summary: issue.summary,
+  };
+}
+
+function contactCompletenessItems(
+  missing: ReadonlySet<string>,
+  parsed: ResumeStructureInput,
+): GuidanceItem[] {
+  return CONTACT_COMPLETENESS.filter((spec) => missing.has(spec.missingKey)).map(
+    (spec) => contactCompletenessItem(spec, parsed),
+  );
+}
+
+/** The Summary gap (#1023, D3) — branches on whether a (too-short) summary is
+ *  already present, so a résumé with a brief summary is told to expand it
+ *  rather than told to add one it already has. */
+function summaryCompletenessItem(
+  missing: ReadonlySet<string>,
+  parsed: ResumeStructureInput,
+): GuidanceItem | null {
+  if (!missing.has("summary")) return null;
+  const issue = parsed.summary?.trim()
+    ? {
+        title: "Summary is brief",
+        suggestion:
+          "Expand your summary to 2–3 sentences covering your core strengths and domain.",
+        summary: "Expand your summary",
+      }
+    : {
+        title: "Summary missing or brief",
+        suggestion:
+          "Add a 2–3 sentence professional summary highlighting your core strengths and domain.",
+        summary: "Add a professional summary",
+      };
+  return {
+    id: "completeness-summary",
+    dimension: "completeness",
+    dimensions: ["completeness"],
+    location: "Summary",
+    targetAnchor: SECTION_IDS.summary,
+    targetType: "section",
+    fieldName: "summary",
+    issues: [{ dimension: "completeness", title: issue.title, suggestion: issue.suggestion }],
+    summary: issue.summary,
+  };
 }
 
 /** The Experience-level gap: no experience at all outranks missing role dates. */
@@ -404,11 +560,24 @@ interface BulletRun {
  * partitioned out by the page's own `buildEntryGroups` — without them in the
  * pass, their bullets would fall into the Experience tail here while the page
  * renders them under their own entry.
+ *
+ * Each run's `section` label is resolved through the SAME
+ * `computeExperienceHeadings` rule `ExperienceSection` renders headings with
+ * (#1023) — not a hardcoded "Experience" — so a role under a second
+ * `section_label` group (e.g. "Leadership Experience") reports that heading
+ * rather than the generic one. The unmatched tail run (`groups.other`) has no
+ * label of its own; per that rule it takes the section's top heading, not
+ * whichever sub-heading happened to be active last.
+ *
+ * Returns `topHeading` alongside the runs — not just `runs[0]?.section` —
+ * because it stays well-defined (falling back to `"Experience"`) even when
+ * `combined` is empty, e.g. an Experience section with no bullets at all,
+ * which is exactly the shape `bulletsBelowFloorItem` needs its location for.
  */
 function editableBulletRuns(
   score: AnonymousAtsScore,
   parsed: ResumeStructureInput,
-): BulletRun[] {
+): { runs: BulletRun[]; topHeading: string } {
   const groups = buildEntryGroups(
     parsed.experience ?? [],
     parsed.projects ?? [],
@@ -416,13 +585,22 @@ function editableBulletRuns(
     parsed.heuristic_certifications ?? [],
     score.bullets ?? [],
   );
-  const roles = groups.experienceGroups.map((group) => ({
-    section: "Experience",
-    group,
-  }));
-  return groups.other
-    ? [...roles, { section: "Experience", group: groups.other }]
-    : roles;
+  const combined = groups.other
+    ? [...groups.experienceGroups, groups.other]
+    : groups.experienceGroups;
+  const { topHeading, inlineHeadings } = computeExperienceHeadings(
+    combined,
+    parsed.experience?.map((e) => e.section_label),
+    undefined,
+  );
+  let activeHeading = topHeading;
+  const runs = combined.map((group, i) => {
+    if (group.experienceIndex === null) return { section: topHeading, group };
+    const inline = inlineHeadings[i];
+    if (inline) activeHeading = inline;
+    return { section: activeHeading, group };
+  });
+  return { runs, topHeading };
 }
 
 /**
@@ -444,32 +622,45 @@ function datesRunIndex(
  * How many bullets may still be asked for a metric. Specificity is full once
  * `SPECIFICITY_TARGET_RATIO` of bullets carry one, and past that another
  * number moves nothing — so only the shortfall is flagged, first in document
- * order. Below the grading floor the dimension isn't scored yet; every
- * metric-less bullet stays flagged there.
+ * order. Only meaningful when `score.specificity.gradable` — below the
+ * grading floor `bulletGuidanceItems` never consults it (#1023, D0): see
+ * {@link bulletsBelowFloorItem}.
  */
 function metricBudget(score: AnonymousAtsScore): number {
-  const { gradable, metricBullets, totalBullets } = score.specificity;
-  return gradable
-    ? metricBulletsToFullSpecificity(metricBullets, totalBullets)
-    : Number.POSITIVE_INFINITY;
+  const { metricBullets, totalBullets } = score.specificity;
+  return metricBulletsToFullSpecificity(metricBullets, totalBullets);
 }
 
-/** One item per bullet with at least one issue, in run order. `budget` is
- *  shared across calls so the metric shortfall is spent in document order.
- *  `critique` is the matched critique finding per bullet id — a critique
- *  issue trails the bullet's heuristic ones, and can be its only one. */
+/**
+ * One item per bullet with at least one issue, in run order. `budget` is
+ * shared across calls so the metric shortfall is spent in document order.
+ * `critique` is the matched critique finding per bullet id — a critique issue
+ * trails the bullet's heuristic ones, and can be its only one.
+ *
+ * `gradable` gates the heuristic (metric/verb/length) checks only (#1023,
+ * D0) — below the grading floor those checks can't move a score that is
+ * pinned at 0 regardless of what the bullets say, so `bulletsBelowFloorItem`
+ * stands in for all of them with one step. Critique issues are NOT gated:
+ * they never move the score by design (#1008), so the "can't move the score"
+ * argument doesn't apply to them, and a bullet whose only issue is a critique
+ * finding still gets its own step.
+ */
 function bulletGuidanceItems(
   runs: readonly BulletRun[],
   budget: { metric: number },
   critique: ReadonlyMap<string, BulletFinding>,
+  gradable: boolean,
 ): GuidanceItem[] {
   const items: GuidanceItem[] = [];
   for (const { section, group } of runs) {
     const role = roleLabel(group.experience);
     group.bullets.forEach((b: BulletObservation, bIndex: number) => {
-      const flagMetric = !b.hasMetric && budget.metric > 0;
-      if (flagMetric) budget.metric--;
-      const issues = bulletIssues(b, flagMetric);
+      let issues: GuidanceIssue[] = [];
+      if (gradable) {
+        const flagMetric = !b.hasMetric && budget.metric > 0;
+        if (flagMetric) budget.metric--;
+        issues = bulletIssues(b, flagMetric);
+      }
       const fromCritique = critiqueIssue(critique.get(b.id), issues);
       if (fromCritique) issues.push(fromCritique);
       if (issues.length === 0) return;
@@ -490,12 +681,73 @@ function bulletGuidanceItems(
   return items;
 }
 
+/** `bulletsBelowFloorItem`'s id — exported so a caller (`ResumeTargeting`) can
+ *  pick this one specific item out of `computeScoreGuidance`'s output without
+ *  re-matching on a string literal it does not own. */
+export const BULLETS_BELOW_FLOOR_ID = "bullets-below-grading-floor";
+
+/**
+ * The single step that replaces every per-bullet heuristic step below the
+ * grading floor (#1023, D0). `score.specificity.gradable` (shared by
+ * `structure`) is false below `ANON_MIN_BULLETS_TO_GRADE` bullets, and both
+ * dimensions score 0 there regardless of wording — so working through
+ * "add a metric" / "use an action verb" steps and watching the score stay at
+ * 0 is exactly the wrong-advice failure this epic exists to remove. One
+ * step asking for more bullets is the only one that can actually move the
+ * number; once the third bullet lands, guidance recomputes and the
+ * metric/verb/length steps appear on their own.
+ *
+ * Suppressed entirely when the résumé has no experience at all — matched by
+ * the same `missing.has("work experience")` predicate that gates
+ * `experienceCompletenessItem`'s own "work experience" item, not by that
+ * item's id: stacking this on top of it would be the same double-advice
+ * defect this issue exists to fix.
+ *
+ * `heading` is the section's own top heading, resolved by the caller through
+ * the same `computeExperienceHeadings` rule `editableBulletRuns` uses — not a
+ * hardcoded "Experience" — so a résumé whose Experience section is titled
+ * e.g. "Career History", or split into label groups, breadcrumbs correctly.
+ */
+function bulletsBelowFloorItem(
+  score: AnonymousAtsScore,
+  missing: ReadonlySet<string>,
+  heading: string,
+): GuidanceItem | null {
+  if (score.specificity.gradable) return null;
+  if (missing.has("work experience")) return null;
+  const needed = ANON_MIN_BULLETS_TO_GRADE - score.specificity.totalBullets;
+  const s = needed === 1 ? "" : "s";
+  return {
+    id: BULLETS_BELOW_FLOOR_ID,
+    dimension: "specificity",
+    dimensions: ["specificity", "structure"],
+    location: heading,
+    targetAnchor: SECTION_IDS.experience,
+    targetType: "section",
+    issues: [
+      {
+        dimension: "specificity",
+        title: "Too few bullets to grade wording",
+        suggestion: `Add at least ${needed} more bullet${s} to your experience, projects, or achievements. Wording checks start at ${ANON_MIN_BULLETS_TO_GRADE} bullets.`,
+      },
+    ],
+    summary: `Add ${needed} more bullet${s}`,
+  };
+}
+
 /**
  * Derive deterministic, actionable guidance items from the anonymous ATS score and resume structure.
- * Items follow the rendered document: Contact → Summary → Experience (the
- * role-dates item in front of the role it lands on, then the section's
- * unmatched bullets) → Education → Skills. Bullets outside Experience are not
- * stepped through — see `editableBulletRuns`.
+ * Items follow the rendered document: Contact → Summary → (bullets-below-floor,
+ * when it applies) → Experience (the role-dates item in front of the role it
+ * lands on, then the section's unmatched bullets) → Education → Skills.
+ * Bullets outside Experience are not stepped through — see
+ * `editableBulletRuns`.
+ *
+ * A scanned layout returns `[]` (#1023, D1): `recommendation.ts` already
+ * treats scanned as a hard blocker ("nothing else matters until the text is
+ * selectable"), and completeness.missing holds nearly every label on an
+ * image-only PDF, so without this gate Fix It would offer "add" steps for
+ * content that is already on the page.
  *
  * `critiqueFindings` — the on-device critique's per-bullet findings, when the
  * user has run it (#1008) — are matched to the SAME editable bullets by text
@@ -509,26 +761,32 @@ export function computeScoreGuidance(
   parsed: ResumeStructureInput,
   critiqueFindings: readonly BulletFinding[] = [],
 ): GuidanceItem[] {
+  if (score.layout.scanned) return [];
   const missing = new Set(score.completeness.missing);
   const experienceItem = experienceCompletenessItem(score, missing);
-  const runs = editableBulletRuns(score, parsed);
+  const { runs, topHeading } = editableBulletRuns(score, parsed);
   // "No experience at all" sits at the section's top; missing dates sit in
   // front of the first undated role.
   const split =
     experienceItem?.id === "completeness-role-dates"
       ? datesRunIndex(runs, parsed)
       : 0;
-  const budget = { metric: metricBudget(score) };
+  const gradable = score.specificity.gradable;
+  const budget = { metric: gradable ? metricBudget(score) : 0 };
   // Matched over every run at once, in render order, so the duplicate-text
   // pairing sees the whole section rather than one side of the dates split.
   const critique = matchCritiqueFindings(
     critiqueFindings,
     runs.flatMap((run) => run.group.bullets),
   );
-  const before = bulletGuidanceItems(runs.slice(0, split), budget, critique);
-  const from = bulletGuidanceItems(runs.slice(split), budget, critique);
+  const before = bulletGuidanceItems(runs.slice(0, split), budget, critique, gradable);
+  const from = bulletGuidanceItems(runs.slice(split), budget, critique, gradable);
+  const summaryItem = summaryCompletenessItem(missing, parsed);
+  const floorItem = bulletsBelowFloorItem(score, missing, topHeading);
   return [
-    ...completenessItems(LEADING_COMPLETENESS, missing),
+    ...contactCompletenessItems(missing, parsed),
+    ...(summaryItem ? [summaryItem] : []),
+    ...(floorItem ? [floorItem] : []),
     ...before,
     ...(experienceItem ? [experienceItem] : []),
     ...from,

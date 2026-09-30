@@ -41,6 +41,7 @@ interface RenderOptions {
   parsed?: ResumeQueryInput;
   bullets?: readonly BulletObservation[];
   bulletSteps?: readonly GuidanceItem[];
+  bulletsBelowFloor?: GuidanceItem | null;
   contactMissing?: ContactDisplayField[];
   skillsOrder?: SkillsReorderController;
   variant?: "card" | "plain";
@@ -102,6 +103,7 @@ function render({
   parsed = resolvableParsed(),
   bullets,
   bulletSteps,
+  bulletsBelowFloor,
   contactMissing,
   skillsOrder,
   variant,
@@ -119,6 +121,7 @@ function render({
         onAddSkill: () => {},
         bullets,
         bulletSteps,
+        bulletsBelowFloor,
         contactMissing,
         skillsOrder,
         variant,
@@ -375,6 +378,122 @@ describe("TargetingSection", () => {
     expect(el.textContent).not.toContain("need attention");
     expect(el.textContent).not.toContain("needs attention");
     expect(el.textContent).not.toContain("passes every check");
+  });
+
+  it("falls back to the below-the-floor step when no bullet steps exist for that reason (#1023, D0)", () => {
+    // Below the grading floor every per-bullet heuristic step is suppressed
+    // (`bulletSteps` is empty), so without a fallback this callout would go
+    // silent even though the résumé plainly has weak bullets — the regression
+    // a PR review caught on #1023.
+    const belowFloorBullets: BulletObservation[] = [
+      {
+        text: "Did stuff",
+        id: "b1",
+        index: 0,
+        hasMetric: false,
+        startsWithActionVerb: false,
+        wellFormedLength: true,
+        wordCount: 8,
+      },
+    ];
+    const belowFloorItem: GuidanceItem = {
+      id: "bullets-below-grading-floor",
+      dimension: "specificity",
+      dimensions: ["specificity", "structure"],
+      location: "Experience",
+      targetAnchor: "experience",
+      targetType: "section",
+      issues: [
+        {
+          dimension: "specificity",
+          title: "Too few bullets to grade wording",
+          suggestion: "Add at least 2 more bullets under your roles.",
+        },
+      ],
+      summary: "Add 2 more bullets",
+    };
+    const el = render({
+      bullets: belowFloorBullets,
+      bulletSteps: [],
+      bulletsBelowFloor: belowFloorItem,
+    });
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Add 2 more bullets");
+    expect(el.textContent).toContain("Add 2 more bullets");
+    // Not the all-clear line — the résumé is not being told it passed.
+    expect(el.textContent).not.toContain("passes every check");
+  });
+
+  it("still shows the below-the-floor phrase when a critique-only bullet step survives the floor (#1023, D0)", () => {
+    // A critique finding is never gated by the grading floor (#1008), so a
+    // below-floor résumé can have `bulletSteps.length > 0` at the same time
+    // as `bulletsBelowFloor` — the headline must still lead with "Add N more
+    // bullets", not fall through to the numeric "N bullets need attention"
+    // branch, which cannot happen when `bulletsBelowFloor` is set.
+    const belowFloorItem: GuidanceItem = {
+      id: "bullets-below-grading-floor",
+      dimension: "specificity",
+      dimensions: ["specificity", "structure"],
+      location: "Experience",
+      targetAnchor: "experience",
+      targetType: "section",
+      issues: [
+        {
+          dimension: "specificity",
+          title: "Too few bullets to grade wording",
+          suggestion: "Add at least 2 more bullets under your roles.",
+        },
+      ],
+      summary: "Add 2 more bullets",
+    };
+    const critiqueOnlyStep: GuidanceItem = {
+      id: "bullet-b1",
+      dimension: "structure",
+      dimensions: ["structure"],
+      location: "Experience → Role · bullet 1",
+      targetAnchor: "bullet-b1",
+      targetType: "bullet",
+      bulletId: "b1",
+      issues: [{ dimension: "structure", title: "Vague", suggestion: "Be specific.", check: "critique" }],
+      summary: "Vague",
+    };
+    const el = render({
+      bulletSteps: [critiqueOnlyStep],
+      bulletsBelowFloor: belowFloorItem,
+    });
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Add 2 more bullets");
+    expect(summary.textContent).not.toContain("need attention");
+  });
+
+  it("combines the below-the-floor step with a missing-contact clause without borrowing its grammar", () => {
+    const belowFloorItem: GuidanceItem = {
+      id: "bullets-below-grading-floor",
+      dimension: "specificity",
+      dimensions: ["specificity", "structure"],
+      location: "Experience",
+      targetAnchor: "experience",
+      targetType: "section",
+      issues: [
+        {
+          dimension: "specificity",
+          title: "Too few bullets to grade wording",
+          suggestion: "Add at least 1 more bullet under your roles.",
+        },
+      ],
+      summary: "Add 1 more bullet",
+    };
+    const missingContact: ContactDisplayField[] = [
+      { key: "phone", label: "phone", value: "", group: "contact", gated: true },
+    ];
+    const el = render({
+      bulletSteps: [],
+      bulletsBelowFloor: belowFloorItem,
+      contactMissing: missingContact,
+    });
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Add 1 more bullet");
+    expect(summary.textContent).toContain("1 contact field missing");
   });
 
   it("summarizes missing contact fields on the summary row", () => {
