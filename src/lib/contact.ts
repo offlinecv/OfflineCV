@@ -11,8 +11,12 @@
 
 import type { CanonicalResume } from "./heuristics/canonical.ts";
 import type { ContactOverrides } from "../hooks/useEditableParse.ts";
+import { ANON_CONTACT_CONFIDENCE_FLOOR } from "./score/score.ts";
 
-export const CONTACT_DISPLAY_CONFIDENCE_FLOOR = 0.5;
+/** Re-exports the scorer's own floor (rather than hardcoding a second copy)
+ *  so the displayed card and `computeAnonymousAtsScore`'s completeness check
+ *  can never silently disagree about which fields count as present (#1141). */
+export const CONTACT_DISPLAY_CONFIDENCE_FLOOR = ANON_CONTACT_CONFIDENCE_FLOOR;
 
 /** Which visual row of the centered card a field belongs to (#146): `identity`
  *  is the name heading, `contact` is the pipe-joined location/email/phone line,
