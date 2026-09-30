@@ -17,6 +17,7 @@ import type {
 } from "./types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import { assignBulletIds } from "./bullet-id.ts";
+import { isContentlessBulletLine } from "./group-bullets.ts";
 import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
 import {
   deriveContactProfiles,
@@ -845,6 +846,17 @@ const LONE_BULLET_RE = /^\s*[•●▪◦‣▶►·�]\s*$/;
  * We deliberately do NOT grade unmarked lines — pooling unmarked lines would
  * over-count narrative role-summary lines. The section boundary is what scopes
  * the pool to accomplishment content; marker detection scopes it to bullets.
+ *
+ * A line for which {@link isContentlessBulletLine} is true is also skipped
+ * (#678): such a line is nothing but a marker (e.g. a lone-bullet merge of
+ * `"•"` + `"4."`, which strips to `"4."` here but re-normalizes to `""`
+ * because a bare numbered marker IS the whole leading-marker pattern).
+ * `groupBulletsByExperience` (group-bullets.ts) deliberately refuses to key
+ * on an empty string, so a pooled empty-key bullet can never be attributed to
+ * the experience entry that owns it — it would only inflate the Specificity
+ * denominator with content-free text. The same predicate gates `addBullet`
+ * in `added-bullets.ts` (#660), so the scorer and the editor can't disagree
+ * about what counts as content-free.
  */
 function extractBulletsFromLines(lines: readonly string[]): string[] {
   const out: string[] = [];
@@ -868,6 +880,7 @@ function extractBulletsFromLines(lines: readonly string[]): string[] {
     }
     const trimmed = stripped.trim();
     if (countWords(trimmed) < ANON_BULLET_MIN_WORDS) continue;
+    if (isContentlessBulletLine(trimmed)) continue;
     out.push(trimmed);
   }
   return out;
