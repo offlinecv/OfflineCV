@@ -344,6 +344,7 @@ export const DATE_RANGE_RE = new RegExp(
 // and re-exported so all existing import paths (sections.ts, markdown-lines.ts,
 // extract-fields.ts) resolve unchanged without touching those files.
 
+import { bulletCharClass, PARSER_BULLET_GLYPHS } from "./bullet-glyphs.ts";
 import {
   SECTION_KEYWORDS,
   SPLIT_LETTER_NORMALIZABLE_SECTIONS,
@@ -377,10 +378,12 @@ export function rejoinSplitLetters(text: string): string {
 }
 
 // Leading bullet glyph on a raw line. Mirrors `isBulletLine` in
-// line-primitives.ts (kept as a local literal here, not an import, to avoid the
-// import cycle line-primitives → regex). A header-shaped line that begins with
-// a bullet is content, not a heading, so the anchor fallback must reject it.
-const LEADING_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
+// line-primitives.ts, both derived from the shared `bullet-glyphs.ts` leaf
+// (#915) rather than each other — `bullet-glyphs.ts` imports nothing, so
+// reaching it here adds no edge back to `line-primitives.ts` (which imports
+// this file) or to anything else. A header-shaped line that begins with a
+// bullet is content, not a heading, so the anchor fallback must reject it.
+const LEADING_BULLET_RE = new RegExp(`^\\s*${bulletCharClass(PARSER_BULLET_GLYPHS)}`);
 
 // Leading decorative / icon-font glyph run on an already-normalized header
 // candidate. A mis-decoded icon-font glyph (e.g. U+00A5 `¥` glued directly to

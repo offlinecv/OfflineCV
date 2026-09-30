@@ -37,6 +37,7 @@ import {
   SEASON,
   OPEN_ENDED,
 } from "./regex.ts";
+import { bulletCharClass, PARSER_BULLET_GLYPHS } from "./bullet-glyphs.ts";
 import { mergeWrappedContinuations } from "./entry-blocks.ts";
 import { isBulletLine, isEntryHeaderShape } from "./line-primitives.ts";
 import {
@@ -148,8 +149,9 @@ const VISUAL_HEADER_MAX_WORDS = 4;
 
 /** Terminal sentence punctuation marks prose, not a heading. */
 const TERMINAL_PUNCT_RE = /[.!?]$/;
-/** Leading bullet glyph — a header-shaped bullet is content, not a heading. */
-const VISUAL_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
+/** Leading bullet glyph — a header-shaped bullet is content, not a heading.
+ *  Derived from {@link PARSER_BULLET_GLYPHS} (`bullet-glyphs.ts`, #915). */
+const VISUAL_BULLET_RE = new RegExp(`^\\s*${bulletCharClass(PARSER_BULLET_GLYPHS)}`);
 
 /**
  * Ratio of a line's gap-above to the document body line-height at which the gap

@@ -16,6 +16,7 @@
 
 import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
 import { MIDDOT } from "../resume-format/index.ts";
+import { bulletCharClass, PARSER_BULLET_GLYPHS } from "./bullet-glyphs.ts";
 import { composeSuffixRegex, selectSuffixTokens } from "./extract/corporate-suffix.ts";
 import type { PdfLine } from "./line-model.ts";
 import {
@@ -34,11 +35,12 @@ import {
   YEAR_RE,
 } from "./regex.ts";
 
-/** Glyphs a template may use as a list bullet. One source of truth for the
- *  line-level tests below and the item-level `isBulletGlyph` — they must agree
- *  on what counts as a bullet, or a glyph stripped from a line's text could
- *  still survive as a standalone pdfjs item. */
-const BULLET_CLASS = "[•‣▪●◦⁃*\\-–—]";
+/** Glyphs a template may use as a list bullet — {@link PARSER_BULLET_GLYPHS},
+ *  the parser's half of the shared `bullet-glyphs.ts` vocabulary (#915). One
+ *  source of truth for the line-level tests below and the item-level
+ *  `isBulletGlyph` — they must agree on what counts as a bullet, or a glyph
+ *  stripped from a line's text could still survive as a standalone pdfjs item. */
+const BULLET_CLASS = bulletCharClass(PARSER_BULLET_GLYPHS);
 const BULLET_LEAD_RE = new RegExp(`^\\s*${BULLET_CLASS}`);
 const BULLET_PREFIX_RE = new RegExp(`^\\s*${BULLET_CLASS}\\s*`);
 const BULLET_GLYPH_RE = new RegExp(`^${BULLET_CLASS}$`);

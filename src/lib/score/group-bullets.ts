@@ -13,6 +13,7 @@
  */
 
 import type { BulletObservation } from "./score.ts";
+import { bulletCharClass, SCORER_BULLET_GLYPHS } from "../heuristics/bullet-glyphs.ts";
 import { splitAchievementType } from "./entry-dates.ts";
 
 // ── Normalization ─────────────────────────────────────────────────────────────
@@ -31,9 +32,15 @@ import { splitAchievementType } from "./entry-dates.ts";
  * separator swallow a `\n` and chain into a marker on the NEXT line as if it
  * stacked with the first, over-stripping a multi-line string (e.g. a WebLLM
  * critique `bullet` field of `"1.\n• Led the effort"`) in one pass.
+ *
+ * The glyph class is {@link SCORER_BULLET_GLYPHS} (`heuristics/bullet-glyphs.ts`,
+ * #915) — kept identical to `score.ts`'s `BULLET_MARKER_RE` and
+ * `apply-overrides.ts`'s own `LEADING_MARKER_RE` by construction, not by
+ * three hand-typed copies staying in sync.
  */
-const LEADING_MARKER_RE =
-  /^(?:[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)])(?:[ \t]+|$))+/;
+const LEADING_MARKER_RE = new RegExp(
+  `^(?:[\\s ]*(?:${bulletCharClass(SCORER_BULLET_GLYPHS)}|\\d+[.)])(?:[ \\t]+|$))+`,
+);
 
 /**
  * Normalize a bullet line for fuzzy matching: lowercase, strip any leading

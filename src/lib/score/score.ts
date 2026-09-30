@@ -16,6 +16,14 @@ import type {
   ProfileLink,
 } from "./types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
+import {
+  AMBIGUOUS_DASH_BULLETS,
+  bulletCharClass,
+  EM_DASH_BULLET,
+  HYPHEN_BULLET_GLYPH,
+  LONE_LINE_BULLET_GLYPHS,
+  SCORER_BULLET_GLYPHS,
+} from "../heuristics/bullet-glyphs.ts";
 import { assignBulletIds } from "./bullet-id.ts";
 import { isContentlessBulletLine } from "./group-bullets.ts";
 import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
@@ -110,12 +118,43 @@ const WEIGHTS = {
  *   bullets are graded — observable as a lower `bulletCount` — so Specificity /
  *   Structure move on résumés of that shape. Same class as 1.5. Scoped to
  *   promoted entries; a normally-parsed role's bullets are untouched.
+ * - 1.9 (2026-09-30): the scorer's bullet-marker class (`BULLET_MARKER_RE`
+ *   and its `group-bullets.ts`/`apply-overrides.ts` mirrors) now recognises
+ *   `⁃` (U+2043 hyphen bullet) and `—` (em dash) as bullets (#915, part (a)
+ *   of #653) — both were already parser bullets, so a résumé that used
+ *   either glyph had those Experience/Projects/Achievements bullets
+ *   segmented correctly by the parser and then silently skipped by the
+ *   scorer, undercounting `bulletCount` and deflating Specificity/Structure.
+ *   Which bullets are pooled moves on résumés using either glyph; every other
+ *   glyph the scorer recognised is unchanged, so an unaffected résumé scores
+ *   the same. One side effect of deriving the two mirrors from the same set:
+ *   `group-bullets.ts` / `apply-overrides.ts` also gain the Word PUA bullet
+ *   (U+F0B7), which only `BULLET_MARKER_RE` recognised before — so a
+ *   U+F0B7-marked line is now normalised / edited like any other bullet.
+ *   Scoring is unaffected (this class already had it). See
+ *   `heuristics/bullet-glyphs.ts` for the full per-glyph adjudication. Also
+ *   (same version, review finding): `extractExperienceSectionBullets` — the
+ *   gate for the #365 glyph-less-prose fallback — now treats a SINGLE
+ *   dash-shaped marker hit (`-`/`–`/`⁃`/`—`) as "no glyph bullets" rather than
+ *   "glyph-bulleted", because a header or sentence that wraps right before the
+ *   dash produces exactly that shape and used to permanently disable the
+ *   fallback for the résumé's real, marker-less bullets. A lone non-dash
+ *   bullet, or two-or-more dash bullets, are unaffected — see that function's
+ *   docblock for the full scenario. Also (same version, second review
+ *   finding, #1137): that gate only controlled the #365 fallback trigger —
+ *   `extractBulletsFromSections` kept pooling the EXPERIENCE section
+ *   ungated, so a genuinely single dash-bulleted role was double-counted
+ *   (once via the ungated pool, once via the fallback it wrongly triggered)
+ *   and a gated-out false positive (`"— Acme Corp"`) stayed in the scored
+ *   pool even though the fallback correctly fired. `extractBulletsFromSections`
+ *   no longer reads the experience section at all; its contribution comes
+ *   solely from `extractExperienceSectionBullets`'s gated output.
  */
 // Surfaced to the UI via the `algoVersion` score field, and consumed by the
 // #321 resume-library cache to version persisted parse+score records (a bump
 // here invalidates stale cached snapshots, which then re-parse from the stored
 // PDF blob — see `resume-library.ts`).
-export const ATS_SCORE_ALGO_VERSION = "1.8";
+export const ATS_SCORE_ALGO_VERSION = "1.9";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -133,8 +172,13 @@ export const ATS_SCORE_ALGO_VERSION = "1.8";
  *  in the private-use area for every default `•` bullet — extremely common
  *  in Word-exported resumes. Neither trips the `fonts_unmappable` cascade (the
  *  rest of the text decodes fine) but without them every bullet would silently
- *  disappear from the per-bullet feedback section. */
-const BULLET_MARKER_RE = /^[\s ]*[-*•●–▪◦‣▶►·�]\s+/;
+ *  disappear from the per-bullet feedback section.
+ *
+ *  Derived from {@link SCORER_BULLET_GLYPHS} (`heuristics/bullet-glyphs.ts`,
+ *  #915) — the scorer's half of the shared vocabulary, which as of #915
+ *  additionally includes `⁃` and `—`: parser bullets this class used to miss,
+ *  silently dropping those bullets from the Specificity/Structure pool. */
+const BULLET_MARKER_RE = new RegExp(`^[\\s\\u00a0]*${bulletCharClass(SCORER_BULLET_GLYPHS)}\\s+`);
 
 /** Numbered-list prefix: "1." or "1)". */
 const NUMBERED_BULLET_RE = /^[\s ]*\d+[.)]\s+/;
@@ -777,9 +821,12 @@ export interface AnonymousAtsScoreInput {
    *  tokens like "August 20XX" regardless of section. */
   rawText: string;
   /** Typed view of the detected section structure, supplied by the cascade
-   *  (which owns section detection). The scorer pools experience bullets from
-   *  `sections.accomplishmentSections` (experience / projects / achievements)
-   *  via `extractBulletsFromSections` (#133). Skills are excluded by
+   *  (which owns section detection). The scorer pools bullets from
+   *  `sections.accomplishmentSections` (experience / projects / achievements,
+   *  #133): the `experience` section ONLY through the gated
+   *  `extractExperienceSectionBullets`, every other accomplishment section
+   *  through `extractBulletsFromSections`, which skips `experience` so no
+   *  bullet is pooled twice (#1137). Skills are excluded by
    *  construction — skills is not an accomplishment section, so its lines are
    *  never in the pool and never judged by the action-verb / metric / length
    *  rules. The pure scorer does not re-derive sections from `rawText`. */
@@ -803,6 +850,21 @@ const PHONE_INVALID_CREDIT = 0.5;
 /** Exported so guidance (#1023) can interpolate the same number into its
  *  "add more bullets" copy rather than hardcoding it. */
 export const ANON_MIN_BULLETS_TO_GRADE = 3;
+/** Dash-shaped bullet glyphs (`-`, `–`, `⁃`, `—`) — the ones ambiguous enough
+ *  that a lone hit isn't reliable evidence of a real glyph-bulleted
+ *  EXPERIENCE section. See {@link DASH_MARKER_RE} / `extractExperienceSectionBullets`. */
+const DASH_MARKER_GLYPHS = [
+  ...AMBIGUOUS_DASH_BULLETS,
+  HYPHEN_BULLET_GLYPH,
+  EM_DASH_BULLET,
+];
+/** Matches a line whose leading marker is one of {@link DASH_MARKER_GLYPHS}.
+ *  Used only to classify an already-extracted bullet for the #365 fallback
+ *  gate below — it does not change which lines `extractBulletsFromLines`
+ *  extracts. */
+const DASH_MARKER_RE = new RegExp(
+  `^[\\s\\u00a0]*${bulletCharClass(DASH_MARKER_GLYPHS)}\\s+`,
+);
 /** Word-count floor for section bullet extraction. Set to 1 so the displayed
  *  bullet count matches what the user can see in the PDF — every line that
  *  begins with a recognised marker AND has at least one non-empty word is a
@@ -827,10 +889,14 @@ const ANON_CONTACT_FIELDS: readonly {
 
 /** A line that is *only* a bullet glyph (no text after it). Word tables can
  *  place the glyph and its text in separate cells, so pdfjs/pdftotext emit the
- *  marker on its own line followed by the text on the next — see #30. Dash-style
- *  markers are excluded here: a lone "-"/"–" line is far more often a divider
- *  than a bullet whose text wandered onto the next line. */
-const LONE_BULLET_RE = /^\s*[•●▪◦‣▶►·�]\s*$/;
+ *  marker on its own line followed by the text on the next — see #30. Every
+ *  dash-shaped glyph, and the asterisk, is excluded here (see
+ *  {@link LONE_LINE_BULLET_GLYPHS}, `heuristics/bullet-glyphs.ts`): a lone dash
+ *  line reads as a divider, and a lone `*` as a footnote mark, far more often
+ *  than as a bullet whose text wandered onto the next line. Unchanged
+ *  by #915 — this predicate was never part of the parser/scorer glyph gap
+ *  that issue closes. */
+const LONE_BULLET_RE = new RegExp(`^\\s*${bulletCharClass(LONE_LINE_BULLET_GLYPHS)}\\s*$`);
 
 /**
  * Pull bullet-like lines out of one section's line array. A line counts as a
@@ -861,7 +927,26 @@ const LONE_BULLET_RE = /^\s*[•●▪◦‣▶►·�]\s*$/;
  * about what counts as content-free.
  */
 function extractBulletsFromLines(lines: readonly string[]): string[] {
-  const out: string[] = [];
+  return extractBulletsFromLinesDetailed(lines).map((b) => b.text);
+}
+
+/** One bullet extracted by {@link extractBulletsFromLinesDetailed}, tagged
+ *  with whether its leading marker was dash-shaped — see
+ *  {@link DASH_MARKER_GLYPHS}. */
+interface ExtractedBullet {
+  text: string;
+  dashMarked: boolean;
+}
+
+/** Same extraction as {@link extractBulletsFromLines}, but keeping the
+ *  dash-marker classification each bullet needs for the #365 fallback gate
+ *  in `extractExperienceSectionBullets`. Kept as the one place this logic
+ *  runs so the plain string-list callers (`extractBulletsFromSections`, the
+ *  main pool) and the gate can never see a different bullet set. */
+function extractBulletsFromLinesDetailed(
+  lines: readonly string[],
+): ExtractedBullet[] {
+  const out: ExtractedBullet[] = [];
   for (let i = 0; i < lines.length; i++) {
     let rawLine = lines[i];
     // Lone-bullet merge (#30): a marker-only line adopts the next line in this
@@ -883,18 +968,26 @@ function extractBulletsFromLines(lines: readonly string[]): string[] {
     const trimmed = stripped.trim();
     if (countWords(trimmed) < ANON_BULLET_MIN_WORDS) continue;
     if (isContentlessBulletLine(trimmed)) continue;
-    out.push(trimmed);
+    out.push({ text: trimmed, dashMarked: DASH_MARKER_RE.test(rawLine) });
   }
   return out;
 }
 
 /**
- * Pool experience bullets from the accomplishment sections (experience /
- * projects / achievements) of the typed {@link SectionedResume}, in canonical
- * policy order (#133). This is what the authed scorer already does per-role
- * (`scoreSpecificity` walks `experience[i].description` then pools project /
- * achievement bullets); pooling directly from the sections aligns the two
- * surfaces and removes the last raw-text re-derivation.
+ * Pool bullets from the accomplishment sections OTHER THAN `experience`
+ * (projects / achievements) of the typed {@link SectionedResume}, in
+ * canonical policy order (#133). This is what the authed scorer already does
+ * per-role (`scoreSpecificity` walks `experience[i].description` then pools
+ * project / achievement bullets); pooling directly from the sections aligns
+ * the two surfaces and removes the last raw-text re-derivation.
+ *
+ * `experience` is excluded here and pooled separately by the caller via
+ * {@link extractExperienceSectionBullets} (review finding on #915/#1137): that
+ * function's dash-single-hit gate is the only place experience bullets may be
+ * read from, or a gated-out false positive (`"— Acme Corp"`) would leak back
+ * in through this ungated path while `poolExperienceDescriptions` ALSO fires
+ * on top of it — double-counting a genuine dash-bulleted role and leaving a
+ * wrapped-header artifact in the scored pool even after the fallback runs.
  *
  * Skills are excluded by construction — skills is not an accomplishment
  * section, so its lines never enter the pool and are never judged by the
@@ -905,6 +998,7 @@ function extractBulletsFromLines(lines: readonly string[]): string[] {
 function extractBulletsFromSections(sections: SectionedResume): string[] {
   const out: string[] = [];
   for (const name of sections.accomplishmentSections) {
+    if (name === "experience") continue;
     const lines = sections.byName.get(name);
     if (lines && lines.length > 0) out.push(...extractBulletsFromLines(lines));
   }
@@ -912,13 +1006,28 @@ function extractBulletsFromSections(sections: SectionedResume): string[] {
 }
 
 /** Marker-bullet lines pooled from the `experience` section ALONE (#365) — the
- *  subset of {@link extractBulletsFromSections} scoped to one accomplishment
- *  section, so the caller can tell "experience carries no glyph bullets" apart
- *  from "no accomplishment section carries glyph bullets". See
- *  {@link poolExperienceDescriptions} for why that distinction matters. */
+ *  one accomplishment section {@link extractBulletsFromSections} skips, kept
+ *  separate so the caller can tell "experience carries no glyph bullets" apart
+ *  from "no accomplishment section carries glyph bullets". Returns `[]` (i.e.
+ *  "no glyph bullets") for the one case a lone hit isn't reliable evidence of
+ *  a real glyph-bulleted section (review on #915): a SINGLE bullet whose
+ *  marker is dash-shaped (`-`, `–`, `⁃`, `—` — {@link DASH_MARKER_GLYPHS}). A
+ *  header or sentence that happens to wrap right before a dash produces
+ *  exactly that shape (`"— Acme Corp"` strips to `"Acme Corp"`), and that lone
+ *  false positive used to satisfy the old "any hit at all" gate, permanently
+ *  disabling the #365 fallback for a résumé whose real bullets never carried a
+ *  marker at all. A lone NON-dash bullet (`•`, `●`, …) is not reprieved by
+ *  this check — that glyph is never an accidental line-wrap artifact, so one
+ *  real bullet stays one real bullet — and two-or-more dash bullets are also
+ *  left alone, because a genuinely dash-bulleted role practically always has
+ *  more than one. See {@link poolExperienceDescriptions} for why the
+ *  distinction matters at all. */
 function extractExperienceSectionBullets(sections: SectionedResume): string[] {
   const lines = sections.byName.get("experience");
-  return lines && lines.length > 0 ? extractBulletsFromLines(lines) : [];
+  if (!lines || lines.length === 0) return [];
+  const bullets = extractBulletsFromLinesDetailed(lines);
+  if (bullets.length === 1 && bullets[0].dashMarked) return [];
+  return bullets.map((b) => b.text);
 }
 
 /**
@@ -926,11 +1035,13 @@ function extractExperienceSectionBullets(sections: SectionedResume): string[] {
  * `description` (one paragraph per line, the shape the entry-block parser folds
  * wrapped prose into) becomes one or more bullets via `splitBullets`.
  *
- * Gated on the EXPERIENCE section's own marker-bullet pool being empty (#365),
- * not the whole-résumé pool: a Google-Docs / Skia export can render Experience
- * bullets as glyph-less paragraphs while Achievements/Projects in the SAME
- * résumé keep their `•` glyphs, so the old "only when the whole pool is empty"
- * gate never fired — Achievements' non-empty pool silently swallowed
+ * Gated on {@link extractExperienceSectionBullets} coming back empty (#365;
+ * since #915 review, that also covers a single dash-marked false positive —
+ * see that function), not the whole-résumé pool: a Google-Docs / Skia
+ * export can render Experience bullets as glyph-less paragraphs while
+ * Achievements/Projects in the SAME résumé keep their `•` glyphs, so the old
+ * "only when the whole pool is empty" gate never fired — Achievements'
+ * non-empty pool silently swallowed
  * Experience's already-correctly-parsed bullets from both the score and the
  * `groupBulletsByExperience` UI attribution (every role showed "No
  * bullet-shaped lines detected"). Gating per-section instead means a glyph
@@ -1037,19 +1148,26 @@ export function computeAnonymousAtsScore(
   // Primary bullet source: marker-bearing lines pooled from the accomplishment
   // sections. Fallback (#365): glyph-less prose templates (Word / Office,
   // Google-Docs/Skia exports) write each role's description as a marker-less
-  // paragraph, so the EXPERIENCE section's own pool comes back empty — pool the
-  // parsed per-role descriptions instead (mirrors the authed scorer's per-role
+  // paragraph, so the EXPERIENCE section's own pool comes back empty — pool
+  // the parsed per-role descriptions instead (mirrors the authed scorer's per-role
   // `splitBullets`). The description lines split exactly as
   // `groupBulletsByExperience` keys on them, so the UI attributes each pooled
   // bullet to its role. Gated on the experience section alone, not the whole
   // pool, so a résumé whose OTHER accomplishment sections (e.g. Achievements)
   // still carry glyph bullets doesn't mask a glyph-less Experience section —
   // see `poolExperienceDescriptions` for the full rationale.
+  //
+  // Experience's own contribution comes ONLY from `extractExperienceSectionBullets`
+  // (review finding on #915/#1137) — `extractBulletsFromSections` no longer
+  // reads the experience section at all, so its single-dash-hit false-positive
+  // gate can't be bypassed by the ungated path, and the fallback below can
+  // never double-pool a bullet this same call already added.
+  const experienceBullets = extractExperienceSectionBullets(input.sections);
   const bullets = suppressExperienceHeaderBullets(
-    extractBulletsFromSections(input.sections),
+    [...experienceBullets, ...extractBulletsFromSections(input.sections)],
     input.parsed.experience,
   );
-  if (extractExperienceSectionBullets(input.sections).length === 0) {
+  if (experienceBullets.length === 0) {
     bullets.push(...poolExperienceDescriptions(input.parsed.experience));
   }
   const pool = scoreBulletPool(bullets);
