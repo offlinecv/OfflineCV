@@ -800,7 +800,9 @@ export interface AnonymousAtsScoreInput {
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
 /** Completeness credit for a phone that parsed but failed libphonenumber isValid(). */
 const PHONE_INVALID_CREDIT = 0.5;
-const ANON_MIN_BULLETS_TO_GRADE = 3;
+/** Exported so guidance (#1023) can interpolate the same number into its
+ *  "add more bullets" copy rather than hardcoding it. */
+export const ANON_MIN_BULLETS_TO_GRADE = 3;
 /** Word-count floor for section bullet extraction. Set to 1 so the displayed
  *  bullet count matches what the user can see in the PDF — every line that
  *  begins with a recognised marker AND has at least one non-empty word is a

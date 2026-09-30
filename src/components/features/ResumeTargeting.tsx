@@ -36,7 +36,7 @@
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
-import type { GuidanceItem } from "../../lib/score/guidance.ts";
+import { BULLETS_BELOW_FLOOR_ID, type GuidanceItem } from "../../lib/score/guidance.ts";
 import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import {
   applyContactOverrides,
@@ -52,7 +52,10 @@ interface ResumeTargetingProps {
   /** The edit-folded parse the surrounding lane renders — `activeResult` on
    *  `/`, `displayResult` in the authoring lane. */
   result: CascadeResult;
-  /** The score graded from that same parse; only `bullets` is read. */
+  /** The score graded from that same parse. `bullets` feeds the "of N"
+   *  denominator; `layout.scanned` gates the contact-missing triage — a
+   *  scanned résumé's fields are on the page but not selectable, so they are
+   *  not "missing" in the sense this triage means. */
   score: AnonymousAtsScore;
   /** Lifted edit state (#82) — the write path for every control below. */
   edit: EditableParse;
@@ -80,12 +83,17 @@ export function ResumeTargeting({
   // `projections.ts`), so a memo here would be a behaviour change dressed up
   // as a relocation.
   const titles = deriveTitles(result.canonical.fields);
-  const contactMissing = contactCompleteness(
-    applyContactOverrides(
-      buildContactFields(result.canonical),
-      edit.contactOverrides,
-    ),
-  ).missing;
+  // Gated on the layout, not just computed, because a scanned résumé's fields
+  // are on the page but not selectable — reporting them "missing" here would
+  // tell the candidate to add text that is already there (#1023 follow-up).
+  const contactMissing = score.layout.scanned
+    ? []
+    : contactCompleteness(
+        applyContactOverrides(
+          buildContactFields(result.canonical),
+          edit.contactOverrides,
+        ),
+      ).missing;
 
   // Skills-ordering coaching (#544). See the module docblock for why one
   // instance survives two call sites.
@@ -112,6 +120,11 @@ export function ResumeTargeting({
       skillsOrder={skillsOrder}
       bullets={score.bullets ?? []}
       bulletSteps={guidance.filter((item) => item.targetType === "bullet")}
+      // Below the grading floor (#1023, D0) every per-bullet heuristic step
+      // above is suppressed, so this single step is the only signal left that
+      // the résumé's bullets need attention — see `TargetingSection`'s
+      // `bulletsBelowFloor` doc.
+      bulletsBelowFloor={guidance.find((item) => item.id === BULLETS_BELOW_FLOOR_ID) ?? null}
       contactMissing={contactMissing}
       variant={variant}
     />

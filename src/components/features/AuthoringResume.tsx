@@ -63,6 +63,8 @@ export function AuthoringResume({
     revealed ? score : null,
     result.canonical.fields,
     parseKey,
+    undefined,
+    result.canonical.fieldConfidence.phone,
   );
 
   return (

@@ -63,7 +63,14 @@ function mockResultWithIssues(): CascadeResult {
             company: "Acme",
             start_date: "2020",
             end_date: "2022",
-            description: "Developed features.", // Weak verb / no metric
+            // Three bullets clear ANON_MIN_BULLETS_TO_GRADE so Specificity /
+            // Structure are gradable: bullet 1 is the flagged one (no
+            // metric, too short); 2 and 3 pass every check so exactly one
+            // marker renders.
+            description:
+              "Developed features.\n" +
+              "Shipped a checkout redesign that lifted conversion by 12 percent\n" +
+              "Led the on-call rotation for 3 engineering teams supporting enterprise customers",
           },
         ],
         education: [],

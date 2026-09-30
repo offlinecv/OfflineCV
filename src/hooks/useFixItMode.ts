@@ -342,17 +342,25 @@ function useFixItMode(
  * `critiqueFindings` are the on-device critique's bullet findings once the
  * user has run it (#1008) — `/` passes them, the authoring lane has no
  * critique. Pass a stable reference: a new array re-derives every step.
+ *
+ * `phoneConfidence` — `canonical.fieldConfidence.phone` (#1023) — is folded
+ * into `fields` here rather than at each call site, so `fields` itself stays
+ * the caller's own stable `canonical.fields` reference instead of a fresh
+ * object literal every render.
  */
 export function useScoreFixIt(
   score: AnonymousAtsScore | null,
   fields: ResumeStructureInput,
   resetKey: unknown,
   critiqueFindings?: readonly BulletFinding[],
+  phoneConfidence?: number,
 ): { items: readonly GuidanceItem[]; fixIt: FixItMode } {
   const items = useMemo(
     () =>
-      score ? computeScoreGuidance(score, fields, critiqueFindings) : [],
-    [score, fields, critiqueFindings],
+      score
+        ? computeScoreGuidance(score, { ...fields, phoneConfidence }, critiqueFindings)
+        : [],
+    [score, fields, critiqueFindings, phoneConfidence],
   );
   const fixIt = useFixItMode(items, resetKey);
   return { items, fixIt };

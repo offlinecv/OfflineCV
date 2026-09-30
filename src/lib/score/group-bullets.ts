@@ -366,6 +366,55 @@ export function isTitleOwnedLine(
   return matchesOwnedKey(normalizeTitleKey(line), new Set([owned]));
 }
 
+// ── Experience-category headings (#311) ─────────────────────────────────────
+
+/**
+ * Split a flat role list into its source experience-category groups when
+ * roles carry distinct `section_label`s. The first real role's label heads
+ * the whole section (`topHeading`); each LATER group whose label differs from
+ * the prior one gets an inline sub-heading before its first role. With no
+ * labels — the common single-experience-section case — every entry is
+ * undefined, so `topHeading` is `heading ?? "Experience"` and `inlineHeadings`
+ * is all undefined: nothing extra renders and output is byte-identical.
+ *
+ * Shared by `ReconstructedResume` (role headings) and `guidance.ts`'s Fix It
+ * location breadcrumb (#1023) — the one place the label-resolution rule
+ * (`section_label` subgroups) is defined, so the two agree on which heading a
+ * MULTI-SECTION role renders under. Pre-existing, outside that guarantee: the
+ * verbatim TOP heading is not one of the two — `guidance.ts`'s call always
+ * passes `heading: undefined`, so a single-section résumé titled e.g. "Career
+ * History" still breadcrumbs as "Experience" in Fix It while `ExperienceSection`
+ * renders the real heading.
+ */
+export function computeExperienceHeadings(
+  groups: readonly BulletGroup[],
+  sectionLabels: readonly (string | undefined)[] | undefined,
+  heading: string | undefined,
+): { topHeading: string; inlineHeadings: (string | undefined)[] } {
+  const labelFor = (g: BulletGroup): string | undefined =>
+    g.experienceIndex === null ? undefined : sectionLabels?.[g.experienceIndex];
+  let firstLabel: string | undefined;
+  let prevLabel: string | undefined;
+  let seenReal = false;
+  const inlineHeadings: (string | undefined)[] = [];
+  for (const g of groups) {
+    if (g.experienceIndex === null) {
+      inlineHeadings.push(undefined);
+      continue;
+    }
+    const label = labelFor(g);
+    if (!seenReal) {
+      firstLabel = label;
+      inlineHeadings.push(undefined);
+    } else {
+      inlineHeadings.push(label && label !== prevLabel ? label : undefined);
+    }
+    if (label) prevLabel = label;
+    seenReal = true;
+  }
+  return { topHeading: firstLabel ?? heading ?? "Experience", inlineHeadings };
+}
+
 // ── Header formatting ─────────────────────────────────────────────────────────
 
 /**

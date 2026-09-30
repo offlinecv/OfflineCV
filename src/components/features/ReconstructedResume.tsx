@@ -54,7 +54,11 @@ import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { projectDisplay } from "../../lib/heuristics/projections.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
-import { buildEntryGroups, roleLabel } from "../../lib/score/group-bullets.ts";
+import {
+  buildEntryGroups,
+  computeExperienceHeadings,
+  roleLabel,
+} from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
@@ -146,44 +150,6 @@ const EXPERIENCE_FIELD_MAP: Record<
   start_date: "start_date",
   end_date: "end_date",
 };
-
-/**
- * Per-#311: split the flat role list into its source experience-category
- * groups when roles carry distinct `section_label`s. The first real role's
- * label heads the whole section (`topHeading`); each LATER group whose label
- * differs from the prior one gets an inline sub-heading before its first role.
- * With no labels — the common single-experience-section case — every entry is
- * undefined, so `topHeading` is `heading ?? "Experience"` and `inlineHeadings`
- * is all undefined: nothing extra renders and output is byte-identical.
- */
-function computeExperienceHeadings(
-  groups: readonly BulletGroup[],
-  sectionLabels: readonly (string | undefined)[] | undefined,
-  heading: string | undefined,
-): { topHeading: string; inlineHeadings: (string | undefined)[] } {
-  const labelFor = (g: BulletGroup): string | undefined =>
-    g.experienceIndex === null ? undefined : sectionLabels?.[g.experienceIndex];
-  let firstLabel: string | undefined;
-  let prevLabel: string | undefined;
-  let seenReal = false;
-  const inlineHeadings: (string | undefined)[] = [];
-  for (const g of groups) {
-    if (g.experienceIndex === null) {
-      inlineHeadings.push(undefined);
-      continue;
-    }
-    const label = labelFor(g);
-    if (!seenReal) {
-      firstLabel = label;
-      inlineHeadings.push(undefined);
-    } else {
-      inlineHeadings.push(label && label !== prevLabel ? label : undefined);
-    }
-    if (label) prevLabel = label;
-    seenReal = true;
-  }
-  return { topHeading: firstLabel ?? heading ?? "Experience", inlineHeadings };
-}
 
 // Exported for `ExperienceSection.test.tsx` only — the lifted "Other bullets"
 // remove control (#626) is a property of THIS component (it is what survives

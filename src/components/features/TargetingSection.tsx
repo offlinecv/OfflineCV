@@ -84,6 +84,12 @@ interface TargetingSectionProps {
    *  metric-only bullet past the metric budget, is flagged by
    *  `needsAttention` but is not a step. */
   bulletSteps?: readonly GuidanceItem[];
+  /** `computeScoreGuidance`'s single below-the-grading-floor step (#1023, D0),
+   *  when the résumé has too few bullets to grade wording — every per-bullet
+   *  heuristic step is suppressed then, so `bulletSteps` alone would go silent
+   *  on a résumé whose bullets are genuinely weak. Null/undefined once the
+   *  résumé clears the floor, where `bulletSteps` carries the signal alone. */
+  bulletsBelowFloor?: GuidanceItem | null;
   /** Missing contact fields from contactCompleteness. */
   contactMissing?: ContactDisplayField[];
   /** Forwarded to `Disclosure`. The caller decides, because only the caller
@@ -102,6 +108,7 @@ export function TargetingSection({
   skillsOrder,
   bullets = [],
   bulletSteps = [],
+  bulletsBelowFloor,
   contactMissing = [],
   variant = "card",
 }: TargetingSectionProps) {
@@ -117,7 +124,7 @@ export function TargetingSection({
 
   const flaggedBullets = bulletSteps.length;
   const missingContactCount = contactMissing.length;
-  const hasBulletGap = flaggedBullets > 0;
+  const hasBulletGap = flaggedBullets > 0 || bulletsBelowFloor != null;
   const hasContactGap = missingContactCount > 0;
   const hasTriage = hasBulletGap || hasContactGap;
 
@@ -143,6 +150,7 @@ export function TargetingSection({
   const triageHeadline = formatTriageHeadline(
     flaggedBullets,
     missingContactCount,
+    bulletsBelowFloor != null ? bulletsBelowFloor.summary : undefined,
   );
 
   // Mirrors the old `AttentionStrip`'s all-clear line, which fired only when
@@ -223,6 +231,7 @@ export function TargetingSection({
             contactMissing={contactMissing}
             hasBulletGap={hasBulletGap}
             hasContactGap={hasContactGap}
+            bulletsBelowFloor={bulletsBelowFloor}
           />
         )}
         <RolesPanel

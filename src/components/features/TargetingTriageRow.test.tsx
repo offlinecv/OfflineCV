@@ -70,6 +70,18 @@ describe("formatTriageHeadline", () => {
       "2 bullets & 3 contact fields need attention",
     );
   });
+
+  it("uses the override phrase verbatim in place of the numeric bullet clause (#1023, D0)", () => {
+    expect(formatTriageHeadline(0, 0, "Add 2 more bullets")).toBe(
+      "Add 2 more bullets",
+    );
+  });
+
+  it("appends the contact clause as a sibling fact, not merged into 'need attention'", () => {
+    expect(formatTriageHeadline(0, 1, "Add 2 more bullets")).toBe(
+      "Add 2 more bullets · 1 contact field missing",
+    );
+  });
 });
 
 const METRIC: GuidanceIssue = {
@@ -118,6 +130,7 @@ function render(props: {
   contactMissing: ContactDisplayField[];
   hasBulletGap: boolean;
   hasContactGap: boolean;
+  bulletsBelowFloor?: GuidanceItem | null;
 }): HTMLDivElement {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -249,5 +262,58 @@ describe("TargetingTriageRow counts Fix It's bullet steps (#913)", () => {
     expect(text).toContain("2 of 5 bullets need attention");
     expect(text).toContain("1 weak verb");
     expect(text).toContain("1 flagged by local AI");
+  });
+});
+
+describe("TargetingTriageRow falls back to the below-floor step (#1023, D0)", () => {
+  const belowFloor: GuidanceItem = {
+    id: "bullets-below-grading-floor",
+    dimension: "specificity",
+    dimensions: ["specificity", "structure"],
+    location: "Experience",
+    targetAnchor: "experience",
+    targetType: "section",
+    issues: [
+      {
+        dimension: "specificity",
+        title: "Too few bullets to grade wording",
+        suggestion: "Add at least 2 more bullets under your roles.",
+      },
+    ],
+    summary: "Add 2 more bullets",
+  };
+
+  it("renders the below-floor summary when bulletSteps is empty for that reason", () => {
+    const el = render({
+      bulletSteps: [],
+      totalBullets: 1,
+      contactMissing: [],
+      hasBulletGap: true,
+      hasContactGap: false,
+      bulletsBelowFloor: belowFloor,
+    });
+    expect(el.textContent).toContain("Add 2 more bullets");
+    expect(el.textContent).not.toContain("of 1 bullet");
+  });
+
+  it("renders both the below-floor phrase and the per-check breakdown, below-floor first, when both are present", () => {
+    // A critique finding is never gated by the grading floor (#1008), so a
+    // below-floor résumé can still carry a real per-bullet step — hiding
+    // either one would drop the only step that can move the score or the
+    // steps that already exist.
+    const el = render({
+      bulletSteps: [makeStep([VERB], 0)],
+      totalBullets: 5,
+      contactMissing: [],
+      hasBulletGap: true,
+      hasContactGap: false,
+      bulletsBelowFloor: belowFloor,
+    });
+    const text = el.textContent ?? "";
+    expect(text).toContain("Add 2 more bullets");
+    expect(text).toContain("1 of 5 bullets need attention");
+    expect(text.indexOf("Add 2 more bullets")).toBeLessThan(
+      text.indexOf("1 of 5 bullets need attention"),
+    );
   });
 });
