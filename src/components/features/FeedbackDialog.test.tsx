@@ -11,6 +11,12 @@
  * and that it lands on the focused `aria-live` confirmation rather than closing
  * — a dialog that vanishes confirms nothing to a screen reader.
  *
+ * Also covers #1006: a star picked then dismissed without submitting still
+ * fires `feedback_rated` (`outcome: "dismissed"`) exactly once, a submit fires
+ * it as `"submitted"` alongside `feedback_submitted` sharing the same
+ * `open_id`-carrying rating, no star picked at all fires nothing, and a submit
+ * followed by the confirmation step's own Close never double-fires it.
+ *
  * Uses raw `createRoot` (no RTL), matching `ExportDialog.test.tsx`.
  */
 
@@ -26,6 +32,7 @@ let root: Root | undefined;
 
 async function mountDialog(opts: {
   trackFeedback?: (...args: unknown[]) => void;
+  trackFeedbackRated?: (...args: unknown[]) => void;
   onClose?: () => void;
   onSubmitted?: () => void;
   /** #912 — a star already picked on the inline nudge. */
@@ -48,6 +55,7 @@ async function mountDialog(opts: {
   vi.resetModules();
   vi.doMock("../../lib/analytics.ts", () => ({
     trackFeedback: opts.trackFeedback ?? (() => {}),
+    trackFeedbackRated: opts.trackFeedbackRated ?? (() => {}),
   }));
   const { FeedbackDialog } = await import("./FeedbackDialog.tsx");
 
@@ -244,10 +252,12 @@ describe("FeedbackDialog", () => {
 
   it("closes without submitting via Cancel / Skip on the constructive step", async () => {
     const trackFeedback = vi.fn();
+    const trackFeedbackRated = vi.fn();
     const onSubmitted = vi.fn();
     const onClose = vi.fn();
     const el = await mountDialog({
       trackFeedback,
+      trackFeedbackRated,
       onSubmitted,
       onClose,
     });
@@ -257,6 +267,158 @@ describe("FeedbackDialog", () => {
     expect(trackFeedback).not.toHaveBeenCalled();
     expect(onSubmitted).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
+    // #1006 — a star picked then dismissed is not silently discarded.
+    expect(trackFeedbackRated).toHaveBeenCalledTimes(1);
+    expect(trackFeedbackRated.mock.calls[0][0]).toMatchObject({
+      rating: 2,
+      outcome: "dismissed",
+    });
+  });
+});
+
+/**
+ * #1006 — a rating picked then dismissed is never recorded today; these cover
+ * the fix: `feedback_rated` fires exactly once per dialog open, at the end of
+ * that open, whatever it ends in.
+ */
+describe("FeedbackDialog — feedback_rated fires once per open (#1006)", () => {
+  it("fires feedback_rated(dismissed) exactly once for a star picked then closed", async () => {
+    const trackFeedback = vi.fn();
+    const trackFeedbackRated = vi.fn();
+    const onClose = vi.fn();
+    const el = await mountDialog({ trackFeedback, trackFeedbackRated, onClose });
+
+    await act(async () => rate(el, 2));
+    await act(async () => button(el, "Cancel / Skip")?.click());
+
+    expect(trackFeedback).not.toHaveBeenCalled();
+    expect(trackFeedbackRated).toHaveBeenCalledTimes(1);
+    expect(trackFeedbackRated.mock.calls[0][0]).toMatchObject({
+      rating: 2,
+      outcome: "dismissed",
+    });
+  });
+
+  it("emits nothing when the dialog opens and closes with no star picked", async () => {
+    const trackFeedback = vi.fn();
+    const trackFeedbackRated = vi.fn();
+    const onClose = vi.fn();
+    const el = await mountDialog({ trackFeedback, trackFeedbackRated, onClose });
+
+    await act(async () => button(el, "Close")?.click());
+
+    expect(trackFeedback).not.toHaveBeenCalled();
+    expect(trackFeedbackRated).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits only the final star when it is changed before the open ends", async () => {
+    const trackFeedbackRated = vi.fn();
+    const el = await mountDialog({ trackFeedbackRated });
+
+    await act(async () => rate(el, 2));
+    await act(async () => button(el, "Back")?.click());
+    await act(async () => rate(el, 5));
+    // Nothing fires per star click — only the close/submit that ends the open.
+    expect(trackFeedbackRated).not.toHaveBeenCalled();
+
+    await act(async () => button(el, "Close")?.click());
+    expect(trackFeedbackRated).toHaveBeenCalledTimes(1);
+    expect(trackFeedbackRated.mock.calls[0][0]).toMatchObject({
+      rating: 5,
+      outcome: "dismissed",
+    });
+  });
+
+  it("fires feedback_rated(submitted) alongside feedback_submitted, sharing open_id, and never double-fires on the confirmation's own Close", async () => {
+    const trackFeedback = vi.fn();
+    const trackFeedbackRated = vi.fn();
+    const el = await mountDialog({ trackFeedback, trackFeedbackRated });
+
+    await act(async () => rate(el, 5));
+    await act(async () => button(el, "Submit")?.click());
+
+    expect(trackFeedback).toHaveBeenCalledTimes(1);
+    expect(trackFeedbackRated).toHaveBeenCalledTimes(1);
+    const submittedOpenId = trackFeedback.mock.calls[0][0].openId;
+    expect(typeof submittedOpenId).toBe("string");
+    expect(submittedOpenId.length).toBeGreaterThan(0);
+    expect(trackFeedbackRated.mock.calls[0][0]).toMatchObject({
+      rating: 5,
+      openId: submittedOpenId,
+      outcome: "submitted",
+    });
+
+    // The thanks step's own Close must not re-fire feedback_rated.
+    await act(async () => button(el, "Close")?.click());
+    expect(trackFeedbackRated).toHaveBeenCalledTimes(1);
+  });
+
+  it("mints a new open_id on each reopen", async () => {
+    const trackFeedback = vi.fn();
+    const el = await mountDialog({ trackFeedback, initialRating: 3 });
+    await act(async () => button(el, "Submit Feedback")?.click());
+    const firstOpenId = trackFeedback.mock.calls[0][0].openId;
+
+    // Unmount before remounting rather than reusing this instance — this
+    // suite mounts fresh per test everywhere else, and a second independent
+    // open must not reuse the first open's id either way.
+    await act(async () => root!.unmount());
+    container?.remove();
+
+    const el2 = await mountDialog({ trackFeedback, initialRating: 4 });
+    await act(async () => button(el2, "Submit")?.click());
+    const secondOpenId = trackFeedback.mock.calls[1][0].openId;
+
+    expect(firstOpenId).not.toBe(secondOpenId);
+  });
+
+  it("mints a new open_id when the SAME instance closes and reopens without unmounting", async () => {
+    // `App.tsx` never unmounts `FeedbackDialog` between opens — it toggles
+    // `open` on one persistent instance, which re-runs the `[open,
+    // initialRating]` effect rather than a fresh mount's initializers. The
+    // unmount/remount test above cannot exercise that path.
+    const trackFeedback = vi.fn();
+    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+      this.open = false;
+    };
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network in tests"))));
+    vi.resetModules();
+    vi.doMock("../../lib/analytics.ts", () => ({
+      trackFeedback,
+      trackFeedbackRated: vi.fn(),
+    }));
+    const { FeedbackDialog } = await import("./FeedbackDialog.tsx");
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onSubmitted = vi.fn();
+    const render = (open: boolean, initialRating: number) =>
+      act(async () => {
+        root!.render(
+          createElement(FeedbackDialog, {
+            open,
+            onClose: () => {},
+            onSubmitted,
+            initialRating,
+          }),
+        );
+      });
+
+    await render(true, 3);
+    await act(async () => button(container!, "Submit Feedback")?.click());
+    const firstOpenId = trackFeedback.mock.calls[0][0].openId;
+
+    await render(false, 3);
+    await render(true, 4);
+    await act(async () => button(container!, "Submit")?.click());
+    const secondOpenId = trackFeedback.mock.calls[1][0].openId;
+
+    expect(firstOpenId).not.toBe(secondOpenId);
   });
 });
 

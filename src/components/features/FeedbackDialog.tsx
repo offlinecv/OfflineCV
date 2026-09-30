@@ -17,8 +17,9 @@
  * CLAUDE.md's ~200 LOC feature-component ceiling.
  *
  * Open/close, the triggers, and the localStorage cooldown all live in
- * `useFeedbackDialog` (`src/hooks/`) — this component is display + step
- * routing + the actual `trackFeedback` call only.
+ * `useFeedbackDialog` (`src/hooks/`); the `feedback_rated` bookkeeping lives
+ * in `useFeedbackRating` (`src/hooks/`, see below) — this component is
+ * display + step routing only.
  *
  * Since #912 this dialog is only ever opened by the USER: the ambient
  * `[★ Feedback]` button, or a star on the inline `FeedbackNudge` (which is
@@ -34,11 +35,21 @@
  * same acknowledgement the retired `FeedbackPanel` gave. It closes only on the
  * user's own `Close`, matching `ExportDialog`: no dialog in this codebase
  * auto-dismisses.
+ *
+ * ## The rating fires once per open, whatever the open ends in (#1006)
+ *
+ * Before #1006 a star picked then dismissed sent nothing — only a step-2
+ * submit fired anything. The `openId`, the fired-once guard, and both
+ * `trackFeedback`/`trackFeedbackRated` call sites live in `useFeedbackRating`
+ * (`src/hooks/`); this component only calls `reportDismissed`/
+ * `reportSubmitted` at the right two moments, so a single open reports at
+ * most once.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Dialog, StarRating } from "@design-system";
-import { trackFeedback, type FeedbackArgs } from "../../lib/analytics.ts";
+import type { FeedbackArgs } from "../../lib/analytics.ts";
+import { useFeedbackRating } from "../../hooks/useFeedbackRating.ts";
 import { FeedbackPositiveStep } from "./FeedbackPositiveStep.tsx";
 import { FeedbackConstructiveStep } from "./FeedbackConstructiveStep.tsx";
 
@@ -85,12 +96,15 @@ export function FeedbackDialog({
 }: FeedbackDialogProps) {
   const [step, setStep] = useState<Step>("rating");
   const [rating, setRating] = useState(0);
+  const { reportDismissed, reportSubmitted } = useFeedbackRating(
+    open,
+    initialRating,
+  );
   const thanksRef = useRef<HTMLDivElement>(null);
 
-  // Fresh every time the dialog opens — a snoozed-then-reopened session
-  // should never land on last time's step or rating. `initialRating` is a dep
-  // as well as `open` because the nudge can hand over a different star on a
-  // later open without this component unmounting in between.
+  // Fresh every open — `initialRating` is a dep alongside `open` because the
+  // nudge can hand a different star to a later open without this component
+  // unmounting in between; either trigger counts as a new open.
   useEffect(() => {
     if (open) {
       setRating(initialRating);
@@ -98,10 +112,9 @@ export function FeedbackDialog({
     }
   }, [open, initialRating]);
 
-  // Submitting unmounts the button that was just activated, which would drop
-  // focus to `<body>` — outside the dialog's tab ring — while the whole body
-  // silently changes. Moving focus into the confirmation is also what makes a
-  // screen reader announce that the submission landed.
+  // Submitting unmounts the button that triggered it, dropping focus to
+  // `<body>` outside the dialog's tab ring; moving it into the confirmation
+  // also makes a screen reader announce the submission landed.
   useEffect(() => {
     if (step === "thanks") thanksRef.current?.focus();
   }, [step]);
@@ -111,18 +124,22 @@ export function FeedbackDialog({
     setStep(stepForRating(value));
   }
 
+  // The single path every close goes through — the rating step's own Close
+  // button, each step-2 body's Close/Cancel, the thanks step's Close, and
+  // `Dialog`'s own Esc handling all call this instead of `onClose` directly.
+  function handleClose(): void {
+    reportDismissed(rating);
+    onClose();
+  }
+
   function handleSubmit(fields: StepSubmission): void {
-    try {
-      trackFeedback({ rating, ...fields });
-    } catch {
-      // Best-effort: capture() is fire-and-forget; still confirm below.
-    }
+    reportSubmitted(rating, fields);
     onSubmitted();
     setStep("thanks");
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title={TITLES[step]} className="max-w-md">
+    <Dialog open={open} onClose={handleClose} title={TITLES[step]} className="max-w-md">
       {step === "rating" && (
         <div className="flex flex-col items-center gap-4 py-2">
           <p className="text-sm text-content-secondary">
@@ -134,7 +151,7 @@ export function FeedbackDialog({
             ariaLabel="Rate your resume experience from 1 to 5 stars"
           />
           <div className="flex w-full justify-end">
-            <Button variant="ghost" size="sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={handleClose}>
               Close
             </Button>
           </div>
@@ -144,14 +161,14 @@ export function FeedbackDialog({
         <FeedbackPositiveStep
           onSubmit={handleSubmit}
           onBack={() => setStep("rating")}
-          onClose={onClose}
+          onClose={handleClose}
         />
       )}
       {step === "constructive" && (
         <FeedbackConstructiveStep
           onSubmit={handleSubmit}
           onBack={() => setStep("rating")}
-          onClose={onClose}
+          onClose={handleClose}
         />
       )}
       {step === "thanks" && (
@@ -170,7 +187,7 @@ export function FeedbackDialog({
             </p>
           </div>
           <div className="flex justify-end">
-            <Button variant="primary" size="sm" onClick={onClose}>
+            <Button variant="primary" size="sm" onClick={handleClose}>
               Close
             </Button>
           </div>
