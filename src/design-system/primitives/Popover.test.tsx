@@ -263,4 +263,75 @@ describe("Popover", () => {
     });
     expect(el.querySelector('[role="dialog"]')).not.toBeNull();
   });
+
+  // #971: below `sm` the viewport-pinned sheet is a de facto bottom sheet,
+  // and one with no backdrop occludes page content with no signal that a
+  // layer is open. jsdom has no layout engine, so this pins the CLASS
+  // CONTRACT and the click-to-dismiss behaviour, not the visual result —
+  // that the scrim only actually paints below `sm` is a real-browser
+  // question for `e2e/mobile/popover-containment.spec.ts`.
+  function scrim(el: HTMLElement): Element {
+    const node = el.querySelector('[aria-hidden="true"]');
+    if (!node) throw new Error("no scrim rendered");
+    return node;
+  }
+
+  it("renders a scrim alongside the panel, absent while closed", () => {
+    const el = render();
+    expect(el.querySelector('[aria-hidden="true"]')).toBeNull();
+
+    act(() => trigger(el).click());
+    const node = scrim(el);
+    // `max-sm:block` is the override that actually shows it below `sm` — see
+    // the `SCRIM` comment for why the un-prefixed default must be `hidden`.
+    expect(node.className).toContain("hidden");
+    expect(node.className).toContain("max-sm:block");
+    expect(node.className).toContain("max-sm:fixed");
+    expect(node.className).toContain("max-sm:inset-0");
+    // Below the panel's `z-20`, above the page.
+    expect(node.className).toContain("max-sm:z-10");
+    // Not a focus stop and not in the accessibility tree — tap-to-dismiss
+    // only, same as a `Dialog`'s `::backdrop` is inert to a11y.
+    expect(node.getAttribute("tabindex")).toBeNull();
+    expect(node.tagName).not.toBe("BUTTON");
+  });
+
+  it("closes the popover and restores focus when the scrim is clicked", () => {
+    const el = render();
+    act(() => trigger(el).click());
+
+    act(() => {
+      scrim(el).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(el.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger(el));
+  });
+
+  it("does not double-dismiss through the outside-mousedown listener when the scrim is tapped", () => {
+    // The scrim renders INSIDE `rootRef`, so the document-level outside-click
+    // listener already treats a pointer-down on it as "inside" and skips its
+    // own `close()` — the scrim's own `onClick` is the one dismiss path. A
+    // bare `mousedown` on the scrim (no accompanying `click`) must therefore
+    // leave the panel open.
+    const el = render();
+    act(() => trigger(el).click());
+
+    act(() => {
+      scrim(el).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(el.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it("does not add the scrim's overflow-x/wrap classes above sm to the panel unscoped", () => {
+    // `break-words` applies at every width (harmless above `sm`, where the
+    // panel is already `max-w`-clamped); `overflow-x-hidden` must stay
+    // `max-sm`-only so nothing above that breakpoint gains an overflow rule
+    // it didn't have before (#971).
+    const el = render();
+    act(() => trigger(el).click());
+    const panel = el.querySelector('[role="dialog"]')!;
+    expect(panel.className).toContain("break-words");
+    expect(panel.className).toContain("max-sm:overflow-x-hidden");
+    expect(panel.className).not.toContain(" overflow-x-hidden");
+  });
 });

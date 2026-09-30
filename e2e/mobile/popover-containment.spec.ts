@@ -104,3 +104,49 @@ test.describe("Popover panel stays on screen at 375px (#959)", () => {
     assertContained(box!, await viewport(page));
   });
 });
+
+// #971: the sheet above is pinned to the VIEWPORT, not the trigger, so
+// scrolling the trigger out of view leaves the panel sitting over unrelated
+// controls with nothing to signal a layer is open. Below `sm` a scrim now
+// renders behind it; tapping the scrim is the dismiss path.
+test.describe("Popover scrim at 375px (#971)", () => {
+  test("docked score strip explainer shows a scrim, tapping it closes the popover", async ({
+    page,
+  }) => {
+    await dropFixtureAndWaitForParse(page, FIXTURE);
+    await dockScoreHero(page);
+
+    const trigger = page.getByRole("button", { name: "How is this scored?" });
+    await trigger.click();
+    const panel = page.getByRole("dialog", { name: "How is this scored?" });
+    await expect(panel).toBeVisible();
+
+    // Locate the scrim by its computed box rather than a structural
+    // selector: `[aria-hidden="true"]` also matches decorative glyphs
+    // elsewhere on the page, but only the scrim covers the full viewport.
+    const scrimBox = await page.evaluate(() => {
+      const nodes = Array.from(
+        document.querySelectorAll('[aria-hidden="true"]'),
+      );
+      const el = nodes.find((n) => {
+        const r = n.getBoundingClientRect();
+        return (
+          r.width >= window.innerWidth - 1 &&
+          r.height >= window.innerHeight - 1
+        );
+      });
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    expect(scrimBox).not.toBeNull();
+    const vp = await viewport(page);
+    assertContained(scrimBox!, vp);
+    expect(scrimBox!.width).toBeGreaterThanOrEqual(vp.width - 1);
+    expect(scrimBox!.height).toBeGreaterThanOrEqual(vp.height - 1);
+
+    await page.mouse.click(4, 4);
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+});

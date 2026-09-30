@@ -104,8 +104,40 @@ import { Button, type ButtonVariant } from "./Button.tsx";
 // `backdrop-blur` and exposes `headerExtra`, so a `Popover` placed there would
 // anchor to the header, not the viewport. The containment e2e cannot catch
 // this: a header-anchored sheet still passes every on-screen bound it checks.
+//
+// `max-sm:overflow-x-hidden` + `break-words` (#971): CSS coerces a `visible`
+// axis to `auto` when the other axis is not `visible`, so `max-sm:overflow-y-
+// auto` was quietly making `overflow-x: auto` too. No caller trips it today —
+// nothing measured a horizontal scrollbar — but a future caller with a long
+// unbreakable string would get one inside the sheet instead of a wrap.
+// `break-words` is unscoped (it does no harm above `sm`, where the panel is
+// already `max-w`-clamped); the `overflow-x-hidden` override is `max-sm`-only
+// so nothing above that breakpoint gains an overflow rule it didn't have.
 const PANEL_BASE =
-  "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:bottom-4 max-sm:w-auto max-sm:max-h-[calc(100vh-2rem)] max-sm:overflow-y-auto";
+  "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg break-words max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:bottom-4 max-sm:w-auto max-sm:max-h-[calc(100vh-2rem)] max-sm:overflow-y-auto max-sm:overflow-x-hidden";
+
+// The scrim (#971): below `sm` the pinned-to-viewport sheet above reads as a
+// bottom sheet, and a bottom sheet with no backdrop occludes whatever page
+// content sits under it with no signal that a layer is open — measured
+// covering unrelated controls once the page had scrolled the trigger out of
+// view. `hidden` + `max-sm:block` (rather than just the `max-sm:fixed` the
+// sheet uses) is load-bearing: without an explicit `display:none` above `sm`,
+// this element is a bare, unpositioned `div` and would render in-flow as a
+// visible block inside `rootRef`'s flex row. `z-10` sits it below the panel's
+// `z-20` and above the page (nothing else in the tree claims a z-index at
+// this level). `bg-content-primary/40` mirrors `Dialog.tsx`'s
+// `backdrop:bg-content-primary/40` — the one other place this primitive's
+// design system dims a layer — so the two scrims read as the same visual
+// language despite one being a native `::backdrop` and the other a plain div.
+// `aria-hidden` + no `tabIndex`: the scrim is a tap target, not a semantic
+// part of the (still non-modal) dialog/menu, so it must not appear in the
+// accessibility tree or the tab order. Its own `onClick` is the ONLY dismiss
+// path it wires: it renders inside `rootRef`, so the existing outside-`
+// mousedown` listener already treats a click on it as "inside" and skips its
+// own `close()` call — one dismiss per tap, not two races over the same
+// state update.
+const SCRIM =
+  "hidden max-sm:block max-sm:fixed max-sm:inset-0 max-sm:z-10 bg-content-primary/40";
 
 /** Which of the trigger's edges the panel is anchored to. */
 const PANEL_ALIGN = { start: "left-0", end: "right-0" } as const;
@@ -247,16 +279,19 @@ export function Popover({
       </Button>
 
       {open && (
-        <div
-          ref={panelRef}
-          id={panelId}
-          role={role}
-          aria-label={panelLabel ?? label}
-          tabIndex={-1}
-          className={panelCls}
-        >
-          {typeof children === "function" ? children({ close }) : children}
-        </div>
+        <>
+          <div aria-hidden="true" onClick={close} className={SCRIM} />
+          <div
+            ref={panelRef}
+            id={panelId}
+            role={role}
+            aria-label={panelLabel ?? label}
+            tabIndex={-1}
+            className={panelCls}
+          >
+            {typeof children === "function" ? children({ close }) : children}
+          </div>
+        </>
       )}
     </div>
   );
