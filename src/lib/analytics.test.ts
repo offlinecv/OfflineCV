@@ -4,6 +4,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   buildFeedbackProps,
+  buildFeedbackRatedProps,
   buildCascadeParseCompletedEvent,
   buildLlmParseRanEvent,
   buildLlmFallbackRanEvent,
@@ -152,6 +153,42 @@ describe("buildFeedbackProps — feedback_submitted payload shaping (#51)", () =
     expect(
       buildFeedbackProps({ rating: 4, wantsContact: true }).wants_contact,
     ).toBe(true);
+  });
+
+  it("omits open_id when not provided, and attaches it verbatim when it is (#1006)", () => {
+    expect("open_id" in buildFeedbackProps({ rating: 4 })).toBe(false);
+    expect(
+      buildFeedbackProps({ rating: 4, openId: "abc-123" }).open_id,
+    ).toBe("abc-123");
+  });
+});
+
+describe("buildFeedbackRatedProps — feedback_rated payload shaping (#1006)", () => {
+  it("carries rating, open_id and outcome, and nothing else", () => {
+    expect(
+      buildFeedbackRatedProps({
+        rating: 2,
+        openId: "abc-123",
+        outcome: "dismissed",
+      }),
+    ).toEqual({ rating: 2, open_id: "abc-123", outcome: "dismissed" });
+  });
+
+  it("distinguishes submitted from dismissed", () => {
+    expect(
+      buildFeedbackRatedProps({
+        rating: 5,
+        openId: "abc-123",
+        outcome: "submitted",
+      }).outcome,
+    ).toBe("submitted");
+  });
+
+  it("omits open_id when empty, matching buildFeedbackProps", () => {
+    expect(
+      "open_id" in
+        buildFeedbackRatedProps({ rating: 3, openId: "", outcome: "dismissed" }),
+    ).toBe(false);
   });
 });
 

@@ -200,6 +200,12 @@ export interface FeedbackArgs {
    * can segment consenting respondents even when no email channel was supplied.
    */
   wantsContact?: boolean;
+  /**
+   * Id minted once per `FeedbackDialog` open (#1006), shared with the
+   * `feedback_rated` event fired for the same open — lets the two be joined
+   * in PostHog without double-counting the rating.
+   */
+  openId?: string;
 }
 
 /**
@@ -216,11 +222,47 @@ export function buildFeedbackProps(args: FeedbackArgs): Record<string, unknown> 
   if (args.feedbackText?.trim()) props.feedback_text = args.feedbackText.trim();
   if (args.wantsContact) props.wants_contact = true;
   if (args.email?.trim()) props.email = args.email.trim();
+  if (args.openId) props.open_id = args.openId;
   return props;
 }
 
 export function trackFeedback(args: FeedbackArgs): void {
   track("feedback_submitted", buildFeedbackProps(args));
+}
+
+/** Whether a `FeedbackDialog` open ended in a submission or was dismissed
+ *  with a rating already picked (#1006). */
+export type FeedbackRatedOutcome = "submitted" | "dismissed";
+
+export interface FeedbackRatedArgs {
+  rating: number;
+  /** The same id `feedback_submitted` carries for this open, when it fires. */
+  openId: string;
+  outcome: FeedbackRatedOutcome;
+}
+
+/**
+ * Shape the `feedback_rated` event properties (#1006) — a distinct event from
+ * `feedback_submitted`, not an `enriched` follow-up, so existing
+ * `feedback_submitted` insights keep their meaning. Fires exactly once per
+ * dialog open, at the end of that open, whether or not the user ever reached
+ * the submit button — a star picked then dismissed is otherwise a signal that
+ * vanishes without a trace. Pure and exported for the same reason as
+ * `buildFeedbackProps`: testable without a PostHog stub.
+ */
+export function buildFeedbackRatedProps(
+  args: FeedbackRatedArgs,
+): Record<string, unknown> {
+  const props: Record<string, unknown> = {
+    rating: args.rating,
+    outcome: args.outcome,
+  };
+  if (args.openId) props.open_id = args.openId;
+  return props;
+}
+
+export function trackFeedbackRated(args: FeedbackRatedArgs): void {
+  track("feedback_rated", buildFeedbackRatedProps(args));
 }
 
 export function trackParseFailed(args: {
