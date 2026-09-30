@@ -395,6 +395,16 @@ const LEADING_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
 // "• Skills".
 const LEADING_GLYPH_RE = /^[^\p{L}\p{N}]+(?=\p{L})/u;
 
+// Trailing decorative rule run (`Education__________`, #820) — a Google
+// Docs/Word section rule drawn as its own text item on the header's baseline,
+// which line assembly merges onto the same line. Shared between the
+// `normalized` strip below and the case-preserving strip fed to
+// matchAnchorFallback, so a qualified header with a separate trailing rule
+// ("IT Experience ___") reaches Guard 7's casing check without the rule's
+// non-letter lead token tripping it. Bounded to >=3 so a 1-2 char trailing
+// dash (a hyphenated header, "Skills -") survives.
+const TRAILING_RULE_RE = /[_—–=-]{3,}\s*$/;
+
 /**
  * Head-noun anchor fallback for qualified section headers (L2 / #111).
  *
@@ -421,9 +431,12 @@ const LEADING_GLYPH_RE = /^[^\p{L}\p{N}]+(?=\p{L})/u;
  *      ("Relevant Experience") from a lowercase prose fragment that happens to
  *      end in the head noun ("i have experience"). Checked on the raw text.
  *
- * `raw` is the original line text (case preserved); `normalized` is the
- * already-trimmed/lowercased/colon-stripped text from the caller. Returns the
- * matched section, or null when no guardrail-passing anchor is found.
+ * `raw` is the original line text, case preserved but with a trailing
+ * decorative rule (TRAILING_RULE_RE) stripped by the caller so Guard 7's
+ * casing check doesn't trip on the rule's non-letter lead token; `normalized`
+ * is the already-trimmed/lowercased/colon-stripped text from the caller.
+ * Returns the matched section, or null when no guardrail-passing anchor is
+ * found.
  */
 /**
  * Closed set of header QUALIFIER words that modify the EXPERIENCE anchor without
@@ -637,6 +650,12 @@ export function matchSectionHeaderDetailed(
   if (!LEADING_BULLET_RE.test(text)) {
     normalized = normalized.replace(LEADING_GLYPH_RE, "");
   }
+  // Strip a trailing decorative rule run (`Education__________`, #820, see
+  // TRAILING_RULE_RE). Mirror of the leading-glyph strip above (#414), on the
+  // trailing side instead. MUST run before the length check below: an ~80-char
+  // decorative run would otherwise short-circuit the match before
+  // normalization gets a chance.
+  normalized = normalized.replace(TRAILING_RULE_RE, "").trim();
   if (normalized.length === 0 || normalized.length > 40) return null;
   // #467 — fold a qualifier-prefixed EXPERIENCE header ("Relevant Experience",
   // "Involvement Experience", "Additional Experience") to the bare "experience"
@@ -703,8 +722,16 @@ export function matchSectionHeaderDetailed(
   // Head-noun anchor fallback for qualified headers ("Relevant Experience").
   // Guard 5 (not a bullet line) runs on the raw text here, before the
   // bullet glyph is normalized away. See matchAnchorFallback for the rest.
+  //
+  // Passes a trailing-rule-stripped, case-preserving value (not raw `text`)
+  // so a qualified header with a separate trailing rule ("IT Experience ___")
+  // doesn't trip Guard 7's casing check on the rule's non-letter lead token —
+  // the leading-glyph/bullet guards above still run on the untouched `text`.
   if (!LEADING_BULLET_RE.test(text)) {
-    const anchored = matchAnchorFallback(text, normalized);
+    const anchored = matchAnchorFallback(
+      text.replace(TRAILING_RULE_RE, "").trim(),
+      normalized,
+    );
     if (anchored) return { section: anchored, viaAnchorFallback: true };
   }
   return null;
