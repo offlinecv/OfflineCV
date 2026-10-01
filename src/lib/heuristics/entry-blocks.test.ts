@@ -1415,3 +1415,105 @@ describe("parseEntryBlocks — header-candidate fold guard vs a dangling-connect
     expect(block.belowAnchorBodyProse?.[0]).toMatch(/^Worked on the billing/);
   });
 });
+
+describe("parseEntryBlocks — caller-supplied anchors with raw headers and no date parsing (#914)", () => {
+  const cfg = {
+    anchor: "institution" as const,
+    collectBody: false,
+    dateParsing: "none" as const,
+    rawHeaderLines: true,
+  };
+
+  it("slices windows at exactly the indices `anchorIndices` returns, keeping every line verbatim and dates unparsed", () => {
+    const section = xSection("education", [
+      { text: "Stanford University", x: 72 },
+      { text: "B.S. Computer Science", x: 72 },
+      { text: "Sep 2018 – Jun 2022", x: 72 },
+      { text: "GPA: 3.9", x: 72 },
+      { text: "MIT", x: 72 },
+      { text: "M.S. Computer Science", x: 72 },
+      { text: "2024", x: 72 },
+    ]);
+    const seen: string[][] = [];
+    const blocks = parseEntryBlocks(section, {
+      ...cfg,
+      anchorIndices: (lines) => {
+        seen.push(lines.map((l) => l.text));
+        return [0, 4];
+      },
+    });
+    // The callback sees the furniture-filtered lines, once, in order.
+    expect(seen).toEqual([section.lines.map((l) => l.text)]);
+    expect(blocks).toHaveLength(2);
+    // Raw mode: the date line and the GPA line both survive as their own
+    // header lines — no date stripping, no prose cutoff, no fold.
+    expect(blocks[0].headerLines).toEqual([
+      "Stanford University",
+      "B.S. Computer Science",
+      "Sep 2018 – Jun 2022",
+      "GPA: 3.9",
+    ]);
+    expect(blocks[0].dates).toEqual({});
+    expect(blocks[1].headerLines).toEqual(["MIT", "M.S. Computer Science", "2024"]);
+    expect(blocks[1].dates).toEqual({});
+  });
+
+  it("still filters page furniture before handing lines to `anchorIndices`", () => {
+    const section = xSection("education", [
+      { text: "Stanford University", x: 72 },
+      { text: "B.S. Computer Science", x: 72 },
+      { text: "June 10, 2026 Jane Doe · Résumé", x: 72 },
+    ]);
+    let handed: string[] = [];
+    const blocks = parseEntryBlocks(section, {
+      ...cfg,
+      anchorIndices: (lines) => {
+        handed = lines.map((l) => l.text);
+        return [0];
+      },
+    });
+    expect(handed).toEqual(["Stanford University", "B.S. Computer Science"]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].headerLines).toEqual(["Stanford University", "B.S. Computer Science"]);
+  });
+
+  it("`dateParsing: \"none\"` is what keeps a dated anchor line intact — the default still strips it", () => {
+    // Control: same anchors, same lines; only the axis differs.
+    const section = xSection("education", [
+      { text: "Stanford University  Sep 2018 – Jun 2022", x: 72 },
+      { text: "B.S. Computer Science", x: 72 },
+    ]);
+    const stripped = parseEntryBlocks(section, {
+      anchor: "institution",
+      collectBody: false,
+      anchorIndices: () => [0],
+    });
+    expect(stripped[0].headerLines[0]).toBe("Stanford University");
+    expect(stripped[0].dates.start_date).toBeDefined();
+
+    const raw = parseEntryBlocks(section, { ...cfg, anchorIndices: () => [0] });
+    expect(raw[0].headerLines[0]).toBe("Stanford University  Sep 2018 – Jun 2022");
+    expect(raw[0].dates).toEqual({});
+  });
+
+  it("throws rather than silently windowing when `anchorIndices` returns an out-of-range index", () => {
+    const section = xSection("education", [
+      { text: "Stanford University", x: 72 },
+      { text: "B.S. Computer Science", x: 72 },
+    ]);
+    expect(() =>
+      parseEntryBlocks(section, { ...cfg, anchorIndices: () => [0, 5] }),
+    ).toThrow(/out-of-range index 5/);
+  });
+
+  it("throws rather than silently windowing when `anchorIndices` returns non-ascending indices", () => {
+    const section = xSection("education", [
+      { text: "Stanford University", x: 72 },
+      { text: "B.S. Computer Science", x: 72 },
+      { text: "MIT", x: 72 },
+    ]);
+    expect(() =>
+      parseEntryBlocks(section, { ...cfg, anchorIndices: () => [2, 0] }),
+    ).toThrow(/non-ascending indices/);
+  });
+});

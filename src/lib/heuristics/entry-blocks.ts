@@ -107,15 +107,21 @@ function endsWithBareYear(text: string): boolean {
  *     (University / College / Institute / ...). For education, where the
  *     school name is the reliable anchor and the date may be absent or
  *     loosely formatted. The date is still parsed off the block when present.
+ *     Education (#914) finalized this as its NOMINAL anchor — the per-line
+ *     `INSTITUTION_HINTS` test is the right description of the common case —
+ *     but supplies {@link EntryBlockConfig.anchorIndices} to replace the
+ *     detection itself: a hint-bearing institution line is only ONE of the
+ *     shapes that opens an education entry (see that field's docblock for the
+ *     rest, and why a single-line predicate can't express them).
  *   - `"first_line"`  — the first non-bullet line after a bullet body starts a
  *     new entry. For projects, where a project name leads each block and a
  *     date is optional. Anchoring on the date would drop date-less projects
  *     entirely.
  *
- * Only `"date_range"` is exercised today (by `extractExperience`); the other
- * two are defined so the projects / achievements / education child issues can
- * plug in a config without touching this file's anchor logic. Their detailed
- * behavior is finalized when those issues land.
+ * `"date_range"` (experience), `"first_line"` (projects, achievements) and
+ * `"institution"` + {@link EntryBlockConfig.anchorIndices} (education) are all
+ * exercised today — every entry-shaped section now goes through this
+ * primitive (#914).
  */
 export type EntryAnchor = "date_range" | "institution" | "first_line";
 
@@ -145,8 +151,88 @@ export interface EntryBlockConfig {
    * keeps title text such as `"Software Engineer Intern Summer 2022"` intact.
    * A genuine year-only experience date still qualifies through the guarded
    * `date_range` anchor (`"Title · Company  2022"`, #358).
+   *
+   * `"none"` (#914, education) disables date stripping entirely: the anchor
+   * line's text reaches `EntryBlock.headerLines` with no date removed (it still
+   * gets the leading-separator strip every anchor line gets — a `| ` or `— `
+   * glued on by a table extraction — so "verbatim" means the words, not the
+   * leading punctuation), and `EntryBlock.dates` is always `{}`. Education's own date parsing
+   * (`parseEducationDates` in `education.ts`) is materially richer than the
+   * generic `parseDateRange` this file reuses — it recovers month precision on
+   * a lone graduation date, accepts the `20XX` redacted-year stub some
+   * Word/Office templates ship, and reclassifies a lone date as `end_date`
+   * rather than `start_date` — and it does that by re-scanning the RAW,
+   * un-stripped line text across the whole entry, not just the anchor line.
+   * Pre-stripping the anchor here would delete the very text that pass needs,
+   * with no generic replacement rich enough to stand in for it. The other
+   * three callers never set this, so their date handling is unchanged.
    */
-  dateParsing?: "all" | "date_anchors_only";
+  dateParsing?: "all" | "date_anchors_only" | "none";
+  /**
+   * Caller-supplied entry-boundary detector, replacing {@link isAnchorLine}'s
+   * per-line test entirely when present (#914, education).
+   *
+   * Every other section's entry boundary is a property of ONE line in
+   * isolation (a date range, an institution hint, a non-bullet line after a
+   * bullet run). Education's is not: the same `INSTITUTION_HINTS` hit that
+   * opens the SECTION's first entry must NOT open a second one on an
+   * institution's own "… Boston, MA" sub-line, so the real rule is stateful
+   * ("does the entry already open have an institution?") and leans on
+   * lookahead the existing anchors have no hook for — a hint-LESS school
+   * ("MIT", "Georgia Tech") is recognized only by being a dated,
+   * header-shaped line immediately followed by its degree line, and a
+   * degree-less certificate program only by carrying its own inline year and
+   * being immediately followed by its institution line. `education.ts`'s
+   * `collectEducationAnchors` ports the exact boundary rule the hand-rolled
+   * chunker used before #914 (the `hasDegree` / `hasInstitution` /
+   * `startsHintlessEntry` / `startsAfterProgramLead` / `startsInstitutionLead`
+   * state machine), so entry SEGMENTATION is unchanged — only entry
+   * ASSEMBLY (windowing, below-anchor collection) now goes through this file.
+   *
+   * Receives the SAME `lines` this function would otherwise hand to
+   * `collectAnchors` — furniture-filtered, but not header-row-folded (that
+   * fold only runs for `"date_range"`) — and returns the indices (into that
+   * array) that open a new entry, in document order. When set, `cfg.anchor`
+   * is still read for every OTHER axis (`dateParsing`'s cross-check,
+   * `bodyMarginX`'s glyph-less gate), so education keeps `anchor: "institution"`
+   * as the nominal/documented shape and uses this field only to replace how
+   * the boundary is actually found.
+   */
+  anchorIndices?: (lines: PdfLine[]) => number[];
+  /**
+   * When true, the below-anchor header collection in `buildEntryBlock` takes
+   * every non-bullet line in the entry's window verbatim — one `EntryBlock`
+   * header line per source line, un-folded and un-peeled — instead of the
+   * prose/paragraph-gap cutoff (`isProseLine`, `startsBodyByGap`,
+   * `isGlyphlessBody`) and the wrap-fold (`foldBelowAnchorLines`,
+   * `peelFlushRightLocation`) the other three callers rely on (#914,
+   * education).
+   *
+   * Those heuristics exist to tell a role's DESCRIPTION apart from its
+   * header — a distinction experience, projects, and achievements all need
+   * and education does not have: an education entry has no prose body (its
+   * only bulleted content is coursework, which `extractEducation` strips out
+   * of the section BEFORE this primitive ever sees it), so every non-bullet
+   * line between one entry's anchor and the next — institution, degree,
+   * dates, a GPA line, an honors line, an annotation — is header content by
+   * construction. Applying the generic cutoff anyway would silently drop a
+   * GPA/honors line across a wide paragraph gap (`startsBodyByGap` fires on
+   * any lowercase-bearing line, which an annotation line usually is), and the
+   * generic fold would MERGE two such lines that happen to sit close together
+   * into one string — both are losses `education.ts`'s own field parsers
+   * (`stripInstitutionLocation`, `parseEducationGrade`, `parseEducationDates`)
+   * are written to recover from separate, un-merged lines. Defaults to false,
+   * so experience/projects/achievements are byte-for-byte unaffected.
+   *
+   * Precondition the caller owns: the section reaches this primitive
+   * BULLET-FREE (education strips coursework bullets first). Two geometry
+   * checks stay live even in raw mode — the run still ends at the first
+   * `isBulletLine` hit, and `isWrappedContinuation` (a line indented past the
+   * bullet-marker margin) is still skipped — but with no bullets in the
+   * section the marker margin is `Infinity`, so neither can fire. Leave a
+   * bullet in and a hanging-indent GPA/honors line can be dropped.
+   */
+  rawHeaderLines?: boolean;
 }
 
 /**
@@ -319,6 +405,7 @@ function shouldParseAnchorDate(
   line: PdfLine,
   cfg: EntryBlockConfig,
 ): boolean {
+  if (cfg.dateParsing === "none") return false;
   return (
     cfg.dateParsing !== "date_anchors_only" ||
     isAnchorLine(line, "date_range")
@@ -1066,6 +1153,39 @@ function startsBodyByGap(lines: PdfLine[], i: number, baseline: number): boolean
 }
 
 /**
+ * Guards the one place `buildEntryBlock` dereferences a caller-supplied
+ * `anchorIndices` hook's output by position (#1145 review). `collectAnchors`
+ * can never produce an out-of-range, descending, or duplicate index — it only
+ * ever pushes `i` for the current `i` of its own forward scan — but the new
+ * public hook computes indices independently of this function's loop, so a
+ * bug there (e.g. indexing against the caller's pre-filter array instead of
+ * the filtered one this function handed it) throws here, naming the config's
+ * anchor kind, instead of an out-of-range index reaching `lines[anchorIdx]`
+ * inside `shouldParseAnchorDate`/`buildEntryBlock` as an opaque `TypeError`,
+ * or a duplicate/descending index silently producing an empty window.
+ */
+function validateAnchorIndices(
+  indices: number[],
+  lineCount: number,
+  anchor: EntryAnchor,
+): number[] {
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i];
+    if (!Number.isInteger(idx) || idx < 0 || idx >= lineCount) {
+      throw new Error(
+        `parseEntryBlocks (anchor: "${anchor}"): anchorIndices returned out-of-range index ${idx} for ${lineCount} line(s)`,
+      );
+    }
+    if (i > 0 && idx <= indices[i - 1]) {
+      throw new Error(
+        `parseEntryBlocks (anchor: "${anchor}"): anchorIndices returned non-ascending indices (${indices[i - 1]} then ${idx})`,
+      );
+    }
+  }
+  return indices;
+}
+
+/**
  * Split a section into entry blocks per `cfg`. Returns an empty array for an
  * absent/empty section or one with no anchors.
  *
@@ -1102,7 +1222,9 @@ export function parseEntryBlocks(
     cfg.anchor === "date_range"
       ? mergeWrappedHeaderRows(furnitureFiltered, cfg.headerLookback || 2)
       : furnitureFiltered;
-  const anchors = collectAnchors(lines, cfg.anchor);
+  const anchors = cfg.anchorIndices
+    ? validateAnchorIndices(cfg.anchorIndices(lines), lines.length, cfg.anchor)
+    : collectAnchors(lines, cfg.anchor);
   if (anchors.length === 0) {
     // A `first_line` section with no anchorable header line is a flat bullet
     // list (an awards / achievements list where every item is itself a bullet,
@@ -1507,6 +1629,66 @@ function splitAnchorProseTail(text: string): {
 }
 
 /**
+ * Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
+ * consecutive non-bullet lines until the body begins or the next anchor. The
+ * body begins at the first bullet OR the first prose paragraph — a glyph-less
+ * description line (Word/Office templates write the description as prose, not
+ * a bulleted list), which must not be folded into company/title — OR, in a
+ * glyph-less section, the first INDENTED marker-less bullet (#215: a role-first
+ * Google-Docs export where the company/title sit at the header margin and the
+ * bullets are plain paragraphs indented past it). A wrapped-bullet tail is
+ * skipped (not a header) but does not end the run.
+ *
+ * `cfg.rawHeaderLines` (#914, education) disables all of that: it has no
+ * prose/description to cut off, so every non-bullet line through `windowEnd`
+ * is a header candidate, taken verbatim (no `peelFlushRightLocation` geometry
+ * split either — see that field's docblock on `EntryBlockConfig`).
+ *
+ * Extracted from `buildEntryBlock` so each function stays below the
+ * cognitive-complexity threshold.
+ */
+function collectBelowAnchorHeaderLines(
+  lines: PdfLine[],
+  anchorIdx: number,
+  windowEnd: number,
+  cfg: EntryBlockConfig,
+  baseline: number,
+  bodyMarginX: number,
+  markerX: number,
+): { belowHeaderLines: PdfLine[]; bodyStart: number } {
+  const belowHeaderLines: PdfLine[] = [];
+  let bodyStart = windowEnd;
+  for (let i = anchorIdx + 1; i < windowEnd; i++) {
+    if (
+      isBulletLine(lines[i]) ||
+      (!cfg.rawHeaderLines &&
+        (isProseLine(lines[i].text) ||
+          startsBodyByGap(lines, i, baseline) ||
+          isGlyphlessBody(lines[i], bodyMarginX) ||
+          // #464 — for `first_line` (projects, achievements) sections whose bodies
+          // are prose paragraphs rather than `•` bullets, `isProseLine` misses
+          // single-sentence bodies (it requires an internal `word. Capital ...
+          // word` sentence break) so the paragraph gets absorbed into headerLines
+          // and never surfaces as `description`. `looksLikeBodyParagraph` catches
+          // the wrapped-paragraph shape by content (period-terminated, long, or
+          // verb-led without a CSV comma), scoped to `first_line` so
+          // `date_range`'s existing header/body split is unaffected.
+          (cfg.anchor === "first_line" && looksLikeBodyParagraph(lines[i].text))))
+    ) {
+      bodyStart = i;
+      break;
+    }
+    if (isWrappedContinuation(lines[i], markerX)) continue;
+    if (cfg.rawHeaderLines) {
+      belowHeaderLines.push(lines[i]);
+    } else {
+      belowHeaderLines.push(...peelFlushRightLocation(lines[i]));
+    }
+  }
+  return { belowHeaderLines, bodyStart };
+}
+
+/**
  * Build the single `EntryBlock` anchored at `anchors[a]`. The entry spans from
  * just after the previous anchor to just before the next: header lines are the
  * (lookback) non-bullet lines above the anchor, the anchor line with its dates
@@ -1651,39 +1833,17 @@ function buildEntryBlock(
     ? stripDateRange(anchorHeadText)
     : anchorLine.text;
 
-  // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
-  // consecutive non-bullet lines until the body begins or the next anchor. The
-  // body begins at the first bullet OR the first prose paragraph — a glyph-less
-  // description line (Word/Office templates write the description as prose, not
-  // a bulleted list), which must not be folded into company/title — OR, in a
-  // glyph-less section, the first INDENTED marker-less bullet (#215: a role-first
-  // Google-Docs export where the company/title sit at the header margin and the
-  // bullets are plain paragraphs indented past it). A wrapped-bullet tail is
-  // skipped (not a header) but does not end the run.
-  const belowHeaderLines: PdfLine[] = [];
-  let bodyStart = windowEnd;
-  for (let i = anchorIdx + 1; i < windowEnd; i++) {
-    if (
-      isBulletLine(lines[i]) ||
-      isProseLine(lines[i].text) ||
-      startsBodyByGap(lines, i, baseline) ||
-      isGlyphlessBody(lines[i], bodyMarginX) ||
-      // #464 — for `first_line` (projects, achievements) sections whose bodies
-      // are prose paragraphs rather than `•` bullets, `isProseLine` misses
-      // single-sentence bodies (it requires an internal `word. Capital ...
-      // word` sentence break) so the paragraph gets absorbed into headerLines
-      // and never surfaces as `description`. `looksLikeBodyParagraph` catches
-      // the wrapped-paragraph shape by content (period-terminated, long, or
-      // verb-led without a CSV comma), scoped to `first_line` so
-      // `date_range`'s existing header/body split is unaffected.
-      (cfg.anchor === "first_line" && looksLikeBodyParagraph(lines[i].text))
-    ) {
-      bodyStart = i;
-      break;
-    }
-    if (isWrappedContinuation(lines[i], markerX)) continue;
-    belowHeaderLines.push(...peelFlushRightLocation(lines[i]));
-  }
+  // Header candidates below the anchor (e.g. "Company <dates>\nTitle"): see
+  // {@link collectBelowAnchorHeaderLines}.
+  const { belowHeaderLines, bodyStart } = collectBelowAnchorHeaderLines(
+    lines,
+    anchorIdx,
+    windowEnd,
+    cfg,
+    baseline,
+    bodyMarginX,
+    markerX,
+  );
 
   // Assemble header lines in document order — above lines, the anchor line
   // (dates stripped), then below lines — tracking where the anchor line lands
@@ -1696,7 +1856,12 @@ function buildEntryBlock(
   // sub-paragraph y-gap signal `bodyUnits` above uses, extracted here so
   // the header-candidate strings and the pre-classified body-prose strings
   // both come from the same folded pool.
-  const foldedBelow = foldBelowAnchorLines(belowHeaderLines, baseline);
+  // #914 — `rawHeaderLines` (education) skips the wrap-fold: each below-anchor
+  // line stays its own string, never merged with a visually-close neighbor
+  // (see the field's docblock on why education needs that).
+  const foldedBelow = cfg.rawHeaderLines
+    ? belowHeaderLines.map((l) => l.text.trim()).filter(Boolean)
+    : foldBelowAnchorLines(belowHeaderLines, baseline);
   // (PR #688 Thread 1) — split the folded below-anchor lines into two buckets
   // by `looksLikeBelowAnchorProse`: obvious body prose is preempted from
   // `headerLines` so `disambiguateCompanyTitle` can't absorb it into an empty
