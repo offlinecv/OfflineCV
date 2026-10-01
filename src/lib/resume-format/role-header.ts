@@ -58,11 +58,17 @@
  *  3. `company` and `location` carry no `ORG_COMMA` — except that `location`
  *     MAY ("Santa Clara, CA"), because the company↔location cut is taken at
  *     the FIRST comma.
- *  4. NEITHER dialect's `title` carries an `ORG_COMMA`, and in the
- *     empty-company dialect neither does `team`. A comma in a title is a very
- *     common real shape ("Director, Marketing"), and it is genuinely lost:
- *     production cleaves the title there and slides every later field one slot
- *     over.
+ *  4. In the empty-company dialect, neither `title` nor `team` carries an
+ *     `ORG_COMMA` — that dialect's header IS a bare `Title, Team`, so a comma
+ *     inside either field is indistinguishable from the separator and
+ *     production cleaves it there. The default dialect's `title` MAY carry a
+ *     comma (#934): the middot before the org run is what marks that
+ *     boundary, so a comma inside the title ("Director, Marketing") is passed
+ *     through as user text on both sides — including when the title's own
+ *     comma tail happens to contain a bare legal-entity word ("Director,
+ *     Group Strategy"), which used to get the WHOLE title misread as the
+ *     company and swapped with the real one (#1130 review; pinned as the
+ *     "November" row in `role-header-cases.ts`).
  *  5. `location` is present only when `company` is. `Title · Location` is
  *     indistinguishable from `Title · Company`.
  *  6. No field's leading/trailing whitespace is meaningful. `composeRoleHeader`
