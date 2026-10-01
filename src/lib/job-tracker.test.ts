@@ -11,9 +11,9 @@
  */
 
 import "fake-indexeddb/auto";
-import { deleteDB } from "idb";
+import { deleteDB, type IDBPDatabase } from "idb";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DB_NAME, closeDB } from "./storage/db.ts";
+import { DB_NAME, closeDB, getDB } from "./storage/db.ts";
 import {
   createJob,
   listJobs,
@@ -287,13 +287,25 @@ describe("job-tracker: bulk-archive sweep (#759)", () => {
     // "stale input". `archiveJobs` re-reads and re-judges each row
     // immediately before that row's own write, so the loop sees it.
     //
-    // The flip is issued from `archiveInterestedOlderThan`'s own predicate
-    // call for the FIRST row and left un-awaited, so it is queued behind that
-    // row's write and settles before the second row is re-read. If that
-    // ordering ever changed, the assertions below fail loudly rather than
-    // passing for the wrong reason.
+    // The flip opens its OWN transaction directly (rather than going through
+    // `setJobStatus`, which needs an `await` of its own before it can even
+    // open one) from INSIDE `stillEligible`'s call for the FIRST row — i.e.
+    // while that row's own `updateRecord` transaction (#763) is still open.
+    // This is deterministic, not a timing race: IndexedDB runs transactions
+    // with overlapping scope, at least one of which is readwrite, in the
+    // order they were CREATED, regardless of how long each one then takes to
+    // settle. A transaction opened here is created strictly before the loop's
+    // SECOND `db.transaction()` call, which cannot happen until the first
+    // row's own transaction has committed — so the flip is guaranteed to run
+    // before the second row is re-read, without needing to win a race against
+    // it. (Routing the flip through `setJobStatus` instead — two further
+    // transactions of its own — was tried and does NOT reliably win: it needs
+    // its own microtask hop before it reaches `db.transaction()` at all, by
+    // which point the loop's second transaction may already have been
+    // created.)
     const first = await plantJob({ title: "First", createdAt: NOW - 60 * DAY_MS });
     const second = await plantJob({ title: "Second", createdAt: NOW - 60 * DAY_MS });
+    const db = (await getDB()) as unknown as IDBPDatabase;
 
     const jobs = await listJobs();
     expect(jobsToArchive(jobs, 30, NOW)).toHaveLength(2);
@@ -304,7 +316,12 @@ describe("job-tracker: bulk-archive sweep (#759)", () => {
       {
         stillEligible: (job) => {
           if (job.id === first.id && flip === undefined) {
-            flip = setJobStatus(second.id, "interviewing");
+            const tx = db.transaction("jobs", "readwrite");
+            flip = (async () => {
+              const existing = await tx.store.get(second.id);
+              await tx.store.put({ ...existing, status: "interviewing", updatedAt: Date.now() });
+              await tx.done;
+            })();
           }
           return isSweepableBucket(job);
         },
@@ -315,6 +332,59 @@ describe("job-tracker: bulk-archive sweep (#759)", () => {
     expect(archived.map((job) => job.id)).toEqual([first.id]);
     expect((await getJobById(first.id))?.status).toBe("archived");
     expect((await getJobById(second.id))?.status).toBe("interviewing");
+  });
+
+  it("closes the get-then-put window for a row's OWN read-modify-write (#763)", async () => {
+    // The residual gap #761 left documented rather than fixed: even with the
+    // per-row re-check above, `getJob` and `saveJob` were two separate
+    // IndexedDB transactions, so a writer landing in the gap BETWEEN them —
+    // for THIS row, not a later one in the loop — was still invisible to the
+    // write that followed. `archiveJobs` now goes through `updateRecord`
+    // (`storage/crud.ts`), which does the read and the write inside one
+    // transaction, so nothing can land in that gap any more.
+    //
+    // The flip is fired from inside `stillEligible`'s call for the row
+    // `archiveJobs` is about to write — i.e. from INSIDE that row's own
+    // read-modify-write transaction. It has to open its own transaction
+    // synchronously right there, the same way the sibling test above does
+    // (`db.transaction("jobs", "readwrite")` called directly) — going through
+    // `setJobStatus` instead does NOT reliably exercise this: `setJobStatus`
+    // needs a microtask hop before it reaches `db.transaction()` itself, so
+    // its write always lands after `archiveJobs`'s transaction has already
+    // committed regardless of whether the read-modify-write was atomic,
+    // which proves nothing about the gap #763 closes. Opened synchronously
+    // here, IndexedDB serializes overlapping readwrite transactions on one
+    // store by creation order, so this flip cannot even start until ours has
+    // committed. If the write this asserts on were still split across two
+    // transactions the way it was before #763, the flip could instead land
+    // between them and its "interviewing" status would be silently
+    // overwritten by the archive's stale in-memory read — losing the
+    // concurrent write is exactly the failure this proves no longer happens.
+    const job = await plantJob({ title: "Sole row", createdAt: NOW - 60 * DAY_MS });
+    const db = (await getDB()) as unknown as IDBPDatabase;
+
+    let flip: Promise<unknown> | undefined;
+    const archived = await archiveJobs([job.id], {
+      stillEligible: (candidate) => {
+        if (flip === undefined) {
+          const tx = db.transaction("jobs", "readwrite");
+          flip = (async () => {
+            const existing = await tx.store.get(job.id);
+            await tx.store.put({ ...existing, status: "interviewing", updatedAt: Date.now() });
+            await tx.done;
+          })();
+        }
+        return isSweepableBucket(candidate);
+      },
+    });
+    await flip;
+
+    // The predicate ran — and answered true — before the flip's own write
+    // could execute, so the sweep still archives the row...
+    expect(archived.map((j) => j.id)).toEqual([job.id]);
+    // ...but the flip, queued behind the sweep's own transaction, lands
+    // strictly AFTER it and is not clobbered underneath it.
+    expect((await getJobById(job.id))?.status).toBe("interviewing");
   });
 
   it("the swept count matches jobsToArchive's preview count when nothing else writes", async () => {
