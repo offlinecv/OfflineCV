@@ -27,6 +27,7 @@ import { ACCOMPLISHMENT_SECTION_NAMES } from "./heuristics/sections.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
 import type { AnonymousAtsScore } from "./score/score.ts";
 import { computeSavableResult } from "./edit/edit-pipeline.ts";
+import { scoreParsedResume } from "./score/score-cascade.ts";
 import { bulletId } from "./score/bullet-id.ts";
 import { normalizeBulletText } from "./score/group-bullets.ts";
 import type { EditSnapshot } from "../hooks/useEditableParse.ts";
@@ -702,7 +703,10 @@ describe("resume-library: pristine base + delta (#768)", () => {
     it("reproduces the stored result and reports no unresolved overrides when the base has not moved", async () => {
       const base = deltaBaseResult([A]);
       const edit = bulletEditSnapshot();
-      const stored = computeSavableResult(base, [], edit);
+      // The observations the restore path folds with: App hydrates `done`
+      // with `scoreParsedResume(baseResult)`, so its score's bullets.
+      const observations = (b: CascadeResult) => scoreParsedResume(b).bullets ?? [];
+      const stored = computeSavableResult(base, observations(base), edit);
 
       const id = await saveResumeToLibrary({
         filename: "cv.pdf",
@@ -716,7 +720,16 @@ describe("resume-library: pristine base + delta (#768)", () => {
 
       const loaded = await loadResumeFromLibrary(id);
       expect(loaded!.unresolved).toEqual([]);
-      expect(loaded!.result).toEqual(stored);
+      // The invariant, not the storage round-trip: re-folding the LOADED pair
+      // reproduces the loaded `result`. `loaded.result` alone is just the
+      // stored blob read back, so comparing it to `stored` proves nothing.
+      expect(
+        computeSavableResult(
+          loaded!.baseResult!,
+          observations(loaded!.baseResult!),
+          loaded!.edit!,
+        ),
+      ).toEqual(loaded!.result);
     });
 
     it("reports a bullet override the base has since rewritten (delta keyed id(A) -> B, base now holds A′)", async () => {
