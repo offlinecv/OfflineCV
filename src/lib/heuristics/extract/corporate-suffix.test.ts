@@ -136,6 +136,17 @@ describe("the tail-deferral set stays broader than the strict set (#917 constrai
     expect(looksLikeTitle("Media Director")).toBe(true);
   });
 
+  it.each(["Group Product Manager", "Systems Engineer"])(
+    "#1144: a title-shaped string starting with a suffix word still reads as a title: %s",
+    (text) => {
+      expect(looksLikeTitle(text)).toBe(true);
+    },
+  );
+
+  it('#1146: a suffix word at the START does not hide a genuine suffix at the END — "Group Engineering Ltd" is a company, not a title', () => {
+    expect(looksLikeTitle("Group Engineering Ltd")).toBe(false);
+  });
+
   // Exercises the PRIVATE, production `COMPANY_TAIL_TOKENS_RE` through its
   // real effect on `extractExperience` (same technique as
   // experience.company-tail-state.test.ts's #641 regression) rather than
