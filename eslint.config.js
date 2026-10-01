@@ -123,13 +123,12 @@ export default [
       "scripts/**",
       "coverage/**",
       ".claude/**",
-      // Private repos cloned into this checkout (see .gitignore). `npm run lint`
+      // Private repo cloned into this checkout (see .gitignore). `npm run lint`
       // is `eslint .`, and flat config does NOT read .gitignore — so without
       // these, lint walks into a nested checkout that has its own toolchain and
       // its own rules. vitest, coverage and tsconfig.app need no equivalent:
       // all three are allowlisted to `src/**` already.
       "internal/**",
-      "extension/**",
     ],
   },
 
