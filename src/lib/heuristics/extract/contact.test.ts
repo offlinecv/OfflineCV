@@ -26,6 +26,181 @@ function mkAnnotation(url: string, yTop = 0): PdfLinkAnnotation {
   return { page: 1, url, rect: [0, 0, 0, 0], yTop };
 }
 
+describe("extractContact — location is a locality, not a mailing address (#837)", () => {
+  it("takes the locality out of a full US street address instead of gluing the street name to it", () => {
+    const lines: PdfLine[] = [
+      mkLine("Chanchal Sharma", 0),
+      mkLine("(718) 555-0100", 10),
+      mkLine("chanchals@example.com", 20),
+      mkLine("4567 Main Street City, ST 98052", 30),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    const result = extractContact(profile, lines);
+
+    expect(result.location).toBe("City, ST");
+  });
+
+  it("takes the locality out of a real street address shape", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("1600 Pennsylvania Ave Springfield, IL 62704", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    const result = extractContact(profile, lines);
+
+    expect(result.location).toBe("Springfield, IL");
+  });
+
+  it("leaves a plain locality line unchanged", () => {
+    const lines: PdfLine[] = [mkLine("Jane Doe", 0), mkLine("Chicago, IL", 10)];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Chicago, IL");
+
+    const lines2: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("San Francisco, CA", 10),
+    ];
+    const profile2: PdfSection = { name: "profile", lines: lines2 };
+    expect(extractContact(profile2, lines2).location).toBe("San Francisco, CA");
+  });
+
+  it("leaves an international locality line unchanged", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("Bengaluru, India", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Bengaluru, India");
+  });
+
+  it("does not regress a house-numbered locality with a suite/unit prefix", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567 Suite 400 Main St, Austin, TX", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Austin, TX");
+  });
+
+  it("takes the locality out of a street address with a spelled-out state", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567 Main Street Springfield, California", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe(
+      "Springfield, California",
+    );
+  });
+
+  it("takes the locality out of an international street address", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("123 Main Street Bengaluru, India", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Bengaluru, India");
+  });
+
+  it("does not swallow a numeric-leading tagline that isn't an address", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("15 years of experience, Austin, TX", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Austin, TX");
+  });
+
+  it("does not swallow a numeric-leading tagline whose street-type word only appears after the locality", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("5 Austin, TX natives founded Park Avenue Ventures", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Austin, TX");
+  });
+
+  it("prefers a later plain US locality line over an address line's international fallback", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567 Main Street Springfield, California", 10),
+      mkLine("Chicago, IL", 20),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Chicago, IL");
+  });
+
+  it("takes the locality out of a street address ending in a suffix outside the original list (PR #1126 review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567 Main Circle City, ST 98052", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("City, ST");
+  });
+
+  it("cuts the tail after the LAST street-type word when a street name carries two (PR #1126 review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("5 Avenue Road Toronto, ON", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Toronto, ON");
+  });
+
+  it("does not mis-pair an international street name's lowercase connective with the city (PR #1126 review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("1 Pl des Vosges, Paris 75004", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBeUndefined();
+  });
+
+  it("does not let an abbreviated 'St.' inside the CITY name be mistaken for a second street-type word (PR #1126 follow-up review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567 Main Street St. Petersburg, FL 33701", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("St. Petersburg, FL");
+  });
+
+  it("still cuts after a later real street-type word when the street name itself opens with 'St.' (PR #1126 follow-up review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("123 St. Charles Avenue New Orleans, LA", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("New Orleans, LA");
+  });
+
+  it("does not let a two-word street-name connective leak a street fragment into the locality (PR #1126 follow-up review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("1 Pl de la Concorde, Paris", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBeUndefined();
+  });
+});
+
 describe("extractContact — email domain is not a website", () => {
   // Regression: an address like `jane@uw.edu` carries a bare domain that
   // URL_RE's domain branch matched (the `@` is a word boundary), phantom-
