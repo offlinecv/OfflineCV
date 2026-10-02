@@ -39,9 +39,9 @@
   ],
   "knownWrong": {
     "experience.company": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "Role 2's employer line reads “Multicultural Engineering Program – State Polytechnic University”; `company` comes back as just the university — the program half is not lost, the parser puts it on `team`, but `experience.company` scores the `company` field alone. The identical shape is measured on unknown/single-column-title-below-anchor. Possibly a defensible org/team split rather than a defect — recorded rather than assumed, because ground truth's job is to state what the page says and let a human adjudicate."
+      "issue": 836,
+      "status": "accepted",
+      "note": "Org/sub-org routing contract, decided in #836: outer org → `company`, sub-org → `team` — see the docblock in src/lib/heuristics/extract/experience-disambiguate.ts."
     }
   }
 }
