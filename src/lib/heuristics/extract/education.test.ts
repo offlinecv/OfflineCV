@@ -1793,3 +1793,23 @@ describe("a mangled date must not mint a school through a range or an honors par
   });
 });
 
+describe("page furniture inside the education section is not an entry (#914)", () => {
+  it("drops a date-stamped `Name · Résumé` footer line instead of minting a phantom second degree", () => {
+    // `google-docs-skia-proxy-honors-subheadings.pdf`: the page footer lands
+    // inside the education section as one line. The pre-#914 chunker opened a
+    // second entry on it (institution "June 10, 2026 Jane Doe · Résumé");
+    // `parseEntryBlocks`' furniture filter now removes it before segmentation.
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. in Computer Science and Engineering, State Institute of Technology",
+        "Mar. 2010 – Aug. 2017",
+        "Awarded a merit scholarship given to promising students in the CSE Department.",
+        "June 10, 2026 Jane Doe · Résumé",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("State Institute of Technology");
+    expect(value[0].degree).toBe("B.S.");
+    expect(value.map((e) => e.institution)).not.toContain("June 10, 2026 Jane Doe · Résumé");
+  });
+});

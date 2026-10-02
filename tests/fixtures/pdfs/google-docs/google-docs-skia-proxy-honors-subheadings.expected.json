@@ -1,13 +1,13 @@
 {
   "schemaVersion": 6,
   "cascade": {
-    "confidence": 0.84,
+    "confidence": 0.86,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "llm",
+    "suggestedEscalation": "none",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -27,7 +27,7 @@
     ],
     "skillsCount": 0,
     "experienceCount": 2,
-    "educationCount": 2,
+    "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 17,
     "certificationsCount": 8,
@@ -78,7 +78,7 @@
     "sectionSource": "markdown",
     "pageCount": 2,
     "rawCharCount": 2723,
-    "extractedCharCount": 2438,
+    "extractedCharCount": 2407,
     "sections": [
       {
         "name": "profile",
@@ -112,7 +112,7 @@
       "hasLocation": true,
       "hasSummary": true,
       "experienceCount": 2,
-      "educationCount": 2,
+      "educationCount": 1,
       "skillsCount": 0
     },
     "linkAnnotationCount": 0,

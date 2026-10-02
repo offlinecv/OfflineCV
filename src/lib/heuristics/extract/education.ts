@@ -2,7 +2,9 @@
 // Copyright 2026 The offlinecv Authors
 
 import type { ResumeEducation } from "../../score/types.ts";
-import type { PdfSection } from "../sections.ts";
+import type { PdfLine, PdfSection } from "../sections.ts";
+import { parseEntryBlocks } from "../entry-blocks.ts";
+import type { EntryBlockConfig } from "../entry-blocks.ts";
 import {
   DEGREE_RE,
   INSTITUTION_HINTS,
@@ -1533,6 +1535,131 @@ function educationFromChunk(chunk: string[]): {
   };
 }
 
+/**
+ * Entry-boundary detector for education, supplied to `parseEntryBlocks` via
+ * `EntryBlockConfig.anchorIndices` (#914). This is the segmentation rule the
+ * pre-#914 hand-rolled chunker used, relocated unchanged in substance: it is
+ * irreducibly STATEFUL in a way no single-line `EntryAnchor` predicate can
+ * express — the very same `INSTITUTION_HINTS` hit that opens a section's
+ * first entry must NOT reopen one on that institution's own "… Boston, MA"
+ * sub-line, so whether a line anchors depends on what the entry already open
+ * has claimed, not on the line in isolation.
+ *
+ * Five cues, applied in document order to the furniture-filtered line array
+ * `parseEntryBlocks` hands it:
+ *   - a DEGREE line once the open entry already has one, and symmetrically an
+ *     INSTITUTION-hint line once the open entry already has one — two degrees
+ *     (or two institutions) in a row is always two entries, in either
+ *     "Degree / School / Dates" or "School / Degree / Dates" ordering;
+ *   - `startsHintlessEntry` — a bare line, once the open entry already holds
+ *     BOTH a degree and an institution, immediately followed by another
+ *     degree, a program lead, or itself a hint-less, degree-less PROGRAM NAME
+ *     carrying its own inline year (#219/#979) — the acronym/hint-less school
+ *     shape (`MIT`, `UC Berkeley`) `INSTITUTION_HINTS` can't see on its own;
+ *   - `startsAfterProgramLead` — anything, once the open entry is already a
+ *     complete degree-less PROGRAM entry (#238,
+ *     `synthetic-degreeless-two-programs.pdf`);
+ *   - `startsInstitutionLead` — a hint-less, dated SCHOOL line immediately
+ *     followed by its own degree line (#882,
+ *     `education-hintless-institution-lead.pdf`) — the INSTITUTION-first twin
+ *     of the degree-first ordering `startsHintlessEntry` covers;
+ *   - the `isDupDegreeSubLine` exception SUPPRESSES a flush when a
+ *     degree-shaped line immediately below the entry's own degree header
+ *     re-parses to the SAME degree+field (#297) — the reconstructed
+ *     Download-PDF institution sub-line carrying the degree text, not a
+ *     second degree.
+ *
+ * Returns the index of each entry's first line, in document order. The first
+ * entry always starts at index 0, whatever its opening line looks like (a
+ * degree-less program's own title line carries neither a degree nor an
+ * institution hint, and still has to anchor something).
+ */
+function collectEducationAnchors(lines: { text: string }[]): number[] {
+  const anchors: number[] = [];
+  let hasDegree = false;
+  let hasInstitution = false;
+  // True once the current entry holds a complete DEGREE-LESS PROGRAM ENTRY (a
+  // program-title lead + its institution line, #238) — see the docblock above.
+  let hasProgramLead = false;
+  let programLeadInstIdx = -1;
+  // Normalized degree+field key of the current entry's degree header (and the
+  // line index it sits at), so a degree line IMMEDIATELY following it that is
+  // really this entry's institution sub-line (#297) is kept attached instead
+  // of splitting off as a phantom entry.
+  let currentDegreeKey: string | null = null;
+  let degreeHeaderLi = -1;
+  const resetOpenEntryState = () => {
+    hasDegree = false;
+    hasInstitution = false;
+    hasProgramLead = false;
+    programLeadInstIdx = -1;
+    currentDegreeKey = null;
+    degreeHeaderLi = -1;
+  };
+  for (let li = 0; li < lines.length; li++) {
+    const text = lines[li].text;
+    // #462/#467 — gate both cues on `isRealEntryHeader` so a DEGREE_RE or
+    // INSTITUTION_HINTS hit on a sub-labelled or event-narration line never
+    // opens a phantom entry (the raw DEGREE_RE hit still reaches
+    // `startsHintlessEntry`'s lookahead below, so a genuine follow-on degree
+    // is unaffected).
+    const isDeg = DEGREE_RE.test(text) && isRealEntryHeader(text);
+    const isInst = INSTITUTION_HINTS.test(text) && isRealEntryHeader(text);
+    const isProgramLead = isProgramLeadAt(lines, li);
+    const next = lines[li + 1]?.text;
+    const startsHintlessEntry =
+      !isDeg &&
+      !isInst &&
+      hasDegree &&
+      hasInstitution &&
+      !isDateOnlyLine(text) &&
+      !PROGRAM_NOTE_RE.test(text) &&
+      !isGradeAnnotationLine(text) &&
+      ((next !== undefined && DEGREE_RE.test(next) && isRealEntryHeader(next)) ||
+        isProgramLead ||
+        isInlineDatedProgramEntry(text));
+    const startsAfterProgramLead =
+      hasProgramLead && (isDeg || isInst || isProgramLead);
+    const isInstLead = isInstitutionLeadAt(lines, li);
+    const startsInstitutionLead =
+      isInstLead && (hasDegree || hasInstitution || hasProgramLead);
+    const isDupDegreeSubLine =
+      isDeg &&
+      hasDegree &&
+      currentDegreeKey !== null &&
+      li === degreeHeaderLi + 1 &&
+      degreeFieldKey(text) === currentDegreeKey;
+    const opensNewEntry =
+      !isDupDegreeSubLine &&
+      ((isDeg && hasDegree) ||
+        (isInst && hasInstitution) ||
+        startsHintlessEntry ||
+        startsAfterProgramLead ||
+        startsInstitutionLead);
+    if (opensNewEntry || anchors.length === 0) {
+      anchors.push(li);
+      resetOpenEntryState();
+    }
+    if (isDeg) hasDegree = true;
+    if (isDeg && currentDegreeKey === null) {
+      currentDegreeKey = degreeFieldKey(text);
+      degreeHeaderLi = li;
+    }
+    // `isInstLead` (a hint-less institution lead, #882) has to set this flag
+    // too, not just the hint-based `isInst` — otherwise a hint-less school
+    // (`MIT`) followed by a hint-BEARING one (`Stanford University`) has no
+    // cue that can see the second boundary. See `isInstitutionLeadAt`'s
+    // docblock for why the CUE itself stays hint-less and only the tracking
+    // widens.
+    if (isInst || isInstLead) hasInstitution = true;
+    // A program lead claims the NEXT line as its institution; mark the entry
+    // a complete program entry only once that institution line is consumed.
+    if (isProgramLead) programLeadInstIdx = li + 1;
+    if (li === programLeadInstIdx) hasProgramLead = true;
+  }
+  return anchors;
+}
+
 export function extractEducation(
   education: PdfSection | undefined,
 ): { value: ResumeEducation[]; confidence: number } {
@@ -1629,12 +1756,20 @@ export function extractEducation(
     i = j - 1;
   }
 
-  // Keep the source-line `idx` on each entry line so a built chunk's start
-  // position is known — that anchor is what coursework is attributed against.
-  const rawEntryLines = ls
-    .map((l, idx) => ({ text: l.text, bullet: isBulletLine(l), idx }))
-    .filter((l) => !l.bullet && !consumed.has(l.idx) && l.text.trim().length > 0)
-    .map((l) => ({ text: l.text, idx: l.idx }));
+  // Keep the source-line index on each entry line so a block's start position
+  // is known — that anchor is what coursework is attributed against. Tracked
+  // in `origIdxOf` (not a field on the line itself) because the wrap-join pass
+  // below mints synthetic merged `PdfLine`s that `parseEntryBlocks` then
+  // filters/reindexes internally (#914).
+  const origIdxOf = new WeakMap<PdfLine, number>();
+  const rawEntryLines: PdfLine[] = [];
+  for (let idx = 0; idx < ls.length; idx++) {
+    const l = ls[idx];
+    if (isBulletLine(l) || consumed.has(idx) || l.text.trim().length === 0)
+      continue;
+    origIdxOf.set(l, idx);
+    rawEntryLines.push(l);
+  }
   // Re-join a degree subject that wrapped across two visual lines. A degree line
   // ending in a dangling connective ("… Computer Science &", "… Electrical and")
   // continues on the next line — PDFs wrap a long field this way. Merge the single
@@ -1642,7 +1777,7 @@ export function extractEducation(
   // and the orphan tail ("Engineering") is not mistaken for an institution. Only a
   // degree line with a dangling connective absorbs, and only a continuation that is
   // not itself a new entry lead (degree / institution-hint / bare date).
-  const lines: { text: string; idx: number }[] = [];
+  const entryLines: PdfLine[] = [];
   for (let i = 0; i < rawEntryLines.length; i++) {
     const cur = rawEntryLines[i];
     const next = rawEntryLines[i + 1];
@@ -1654,178 +1789,78 @@ export function extractEducation(
       !INSTITUTION_HINTS.test(next.text) &&
       !isDateOnlyLine(next.text)
     ) {
-      lines.push({ text: `${cur.text.trim()} ${next.text.trim()}`, idx: cur.idx });
+      const merged: PdfLine = {
+        ...cur,
+        text: `${cur.text.trim()} ${next.text.trim()}`,
+        items: [...cur.items, ...next.items],
+      };
+      origIdxOf.set(merged, origIdxOf.get(cur)!);
+      entryLines.push(merged);
       i++; // continuation consumed
     } else {
-      lines.push(cur);
+      entryLines.push(cur);
     }
   }
-  if (lines.length === 0) return { value: [], confidence: 0 };
+  if (entryLines.length === 0) return { value: [], confidence: 0 };
 
-  // Group into one chunk per qualification. A new chunk begins when the current
-  // one already holds a degree and the next line introduces another degree, or
-  // already holds an institution and the next line introduces another. This
-  // keeps multi-degree sections from collapsing into a single entry (only the
-  // first degree was ever extracted before) and works for both
-  // "Degree / School / Dates" and "School / Degree / Dates" orderings.
-  const chunks: { text: string; idx: number }[][] = [];
-  let current: { text: string; idx: number }[] = [];
-  let hasDegree = false;
-  let hasInstitution = false;
-  // True once the current chunk holds a complete DEGREE-LESS PROGRAM ENTRY
-  // (a program-title lead + its institution line, #238). It becomes the
-  // boundary signal a degree-keyword-less entry otherwise lacks: a following
-  // degree / institution-hint / new program-lead then opens a fresh chunk,
-  // instead of merging in and dragging the program's inline year onto the next
-  // (dateless) school. Set only AFTER the program's own institution line is
-  // consumed (`programLeadInstIdx`), so that institution line is not itself
-  // mistaken for the start of a new entry.
-  let hasProgramLead = false;
-  let programLeadInstIdx = -1;
-  // Normalized degree+field key of the current chunk's degree header (and the
-  // line index it sits at), so a degree line IMMEDIATELY following it that is
-  // really this entry's INSTITUTION sub-line (same degree+field, #297) is kept
-  // attached instead of splitting off as a phantom entry. Adjacency is required:
-  // a same-degree second entry (two "B.S., Computer Science" from different
-  // schools) has its own institution line BETWEEN the two degree headers, so it
-  // is not adjacent and still splits correctly.
-  let currentDegreeKey: string | null = null;
-  let degreeHeaderLi = -1;
-  const flush = () => {
-    if (current.length > 0) chunks.push(current);
-    current = [];
-    hasDegree = false;
-    hasInstitution = false;
-    hasProgramLead = false;
-    programLeadInstIdx = -1;
-    currentDegreeKey = null;
-    degreeHeaderLi = -1;
+  // Segment into entry blocks via the shared `parseEntryBlocks` primitive
+  // (#914), replacing the hand-rolled chunk-assembly loop that used to live
+  // here (the `" | "` join is `educationFromChunk`'s own re-parse step and
+  // still runs on every block). `collectEducationAnchors` (below) supplies the entry boundaries
+  // — see its docblock and `EntryBlockConfig.anchorIndices` for why education's
+  // boundary rule can't be expressed as a per-line `EntryAnchor` predicate —
+  // and `rawHeaderLines`/`dateParsing: "none"` keep every non-bullet line of a
+  // block exactly as education's own field parsers need it (see their
+  // docblocks in `entry-blocks.ts`). `blockStartIdx` is filled by the
+  // `anchorIndices` callback as a side effect, parallel to the returned
+  // blocks, carrying each entry's starting *source* line index forward for
+  // coursework attribution (replacing the old `chunk[0].idx`).
+  let blockStartIdx: number[] = [];
+  const cfg: EntryBlockConfig = {
+    anchor: "institution",
+    collectBody: false,
+    dateParsing: "none",
+    rawHeaderLines: true,
+    anchorIndices: (lines) => {
+      const anchors = collectEducationAnchors(lines);
+      blockStartIdx = anchors.map((i) => {
+        const orig = origIdxOf.get(lines[i]);
+        if (orig === undefined) {
+          // `lines` here is always a (possibly furniture-filtered) view over
+          // `entryLines`, every element of which was registered in `origIdxOf`
+          // above — a miss means a line reached this callback that this
+          // function never tracked, which `?? 0` would otherwise paper over
+          // by silently attributing a later entry's coursework to entry 0
+          // (the #190 shape review flagged on PR #1145).
+          throw new Error(
+            `extractEducation: anchor index ${i} has no tracked source line`,
+          );
+        }
+        return orig;
+      });
+      return anchors;
+    },
   };
-  for (let li = 0; li < lines.length; li++) {
-    const text = lines[li].text;
-    // #462/#467 — a DEGREE_RE or INSTITUTION_HINTS hit on a sub-labelled line
-    // ("Achievements: Graduated B.E. with Distinction"), an event-narration
-    // sentence ("Graduated B.E. …"), or a body sentence that contains an
-    // incidental institution-word substring (e.g. `\bcollege\b` inside
-    // "inter-college hackathons") is body prose that bled in from a mis-routed
-    // compound header ("CERTIFICATIONS & ACTIVITIES") or an unrouted qualified
-    // header ("RELEVANT COURSEWORK"), not a new education entry. Gate BOTH
-    // isDeg and isInst on `isRealEntryHeader` so such lines never open a
-    // phantom entry — the raw DEGREE_RE hit still shows up in
-    // `startsHintlessEntry`'s next-line lookahead below (which uses raw
-    // DEGREE_RE.test), so genuine follow-on degrees are unaffected.
-    const isDeg = DEGREE_RE.test(text) && isRealEntryHeader(text);
-    const isInst =
-      INSTITUTION_HINTS.test(text) && isRealEntryHeader(text);
-    const isProgramLead = isProgramLeadAt(lines, li);
-    // A bare line (no degree/institution-hint, not a date) that arrives once the
-    // current chunk already holds BOTH a degree and an institution, AND is
-    // immediately followed by a degree, begins a new entry whose school is
-    // acronym-only / hint-less (`MIT`, `UC Berkeley`) — School / Degree ordering
-    // where the hint-based flush below can't see the boundary (#184). The
-    // next-line-is-a-degree lookahead distinguishes a real new school from a
-    // trailing prose note (`GPA: 3.8`, `Minor in Economics`), which carries no
-    // following degree and so must stay inside the current entry.
-    const next = lines[li + 1]?.text;
-    const startsHintlessEntry =
-      !isDeg &&
-      !isInst &&
-      hasDegree &&
-      hasInstitution &&
-      !isDateOnlyLine(text) &&
-      // …and is not itself a sub-field NOTE (#883). The next-line lookahead
-      // below was the only thing keeping "GPA: 3.8" inside its entry, and it
-      // fails on a Degree-then-Degree ordering where the note IS followed by a
-      // degree: the note then leads the next chunk and its grade is attributed
-      // to the wrong qualification. `PROGRAM_NOTE_RE` recognises the labelled
-      // notes by prefix; `isGradeAnnotationLine` covers an unlabelled honors
-      // phrase ("Magna Cum Laude"), which has no prefix to recognise.
-      !PROGRAM_NOTE_RE.test(text) &&
-      !isGradeAnnotationLine(text) &&
-      // Same `isRealEntryHeader` gate as `isDeg` above (#462/#467): a phantom
-      // DEGREE_RE hit on a body-prose "Graduated B.E. with Distinction" sentence
-      // must not persuade the chunker that this hint-less line leads a new
-      // acronym-school entry.
-      ((next !== undefined && DEGREE_RE.test(next) && isRealEntryHeader(next)) ||
-        isProgramLead ||
-        // …or the boundary line is itself a hint-less, degree-less PROGRAM NAME
-        // carrying its own graduation year inline ("MIT Applied Data Science
-        // (2023)", #219). The inline year is what the old code would bleed onto
-        // the preceding school; splitting here keeps it with its own program.
-        // Requires a Title-case program lead (not a `GPA:`/`Minor` note, not a
-        // bare "Fall 2013 – Spring 2014" date range — which `isDateOnlyLine`
-        // already excluded above) so an honors/awards line never splits.
-        //
-        // Asks {@link isInlineDatedProgramEntry} (#979) because at this
-        // boundary site the partner may be nothing at all: a single bare token
-        // beside a year ("Setember 2021", "Agust 2018") must not mint an
-        // institution from a mangled date.
-        isInlineDatedProgramEntry(text));
-    // Once the current chunk is a complete degree-less program entry (#238), a
-    // new entry lead — a degree, an institution-hint, or another program lead —
-    // closes it. The program's own institution line (`programLeadInstIdx`) is
-    // excluded because `hasProgramLead` is not yet set when it arrives.
-    const startsAfterProgramLead =
-      hasProgramLead && (isDeg || isInst || isProgramLead);
-    // A hint-less INSTITUTION LEAD (#882) — "Georgia Tech  May 2024" followed by
-    // its degree line — closes whatever entry is open. Gated on the current chunk
-    // already holding an entry's worth of content for the same reason every other
-    // cue here is: the FIRST institution lead in the section opens the section's
-    // first entry and must not flush an empty chunk.
-    const isInstLead = isInstitutionLeadAt(lines, li);
-    const startsInstitutionLead =
-      isInstLead && (hasDegree || hasInstitution || hasProgramLead);
-    // A degree line that parses to the SAME degree+field as the current chunk's
-    // header is that entry's own institution SUB-LINE (the reconstructed
-    // "Institution" line polluted with the degree text, #297) — not a second
-    // degree. Keep it attached: suppress BOTH the degree-repeat and the
-    // institution-repeat flush this line would otherwise trigger.
-    const isDupDegreeSubLine =
-      isDeg &&
-      hasDegree &&
-      currentDegreeKey !== null &&
-      li === degreeHeaderLi + 1 &&
-      degreeFieldKey(text) === currentDegreeKey;
-    if (
-      !isDupDegreeSubLine &&
-      ((isDeg && hasDegree) ||
-        (isInst && hasInstitution) ||
-        startsHintlessEntry ||
-        startsAfterProgramLead ||
-        startsInstitutionLead)
-    )
-      flush();
-    current.push(lines[li]);
-    if (isDeg) hasDegree = true;
-    if (isDeg && currentDegreeKey === null) {
-      currentDegreeKey = degreeFieldKey(text);
-      degreeHeaderLi = li;
-    }
-    // `isInstLead` (a HINT-LESS institution lead, #882) has to set this flag
-    // too, not just the hint-based `isInst` — otherwise a hint-less school
-    // (`MIT`) followed by a hint-BEARING one (`Stanford University`) has no cue
-    // that can see the second boundary: `isInst && hasInstitution` needs
-    // `hasInstitution` to already be true, but the hint-less predecessor never
-    // set it via `isInst` (it has no hint word to match). Caught in review —
-    // Stanford's line rode into MIT's still-open chunk and the two schools'
-    // degrees swapped on export. Broadening `isInstitutionLeadAt` itself to
-    // admit hinted leads was tried first and reverted (see its docblock) — this
-    // is the narrower, corpus-safe fix: the CUE stays hint-less, only the
-    // TRACKING widens to recognize what it already found.
-    if (isInst || isInstLead) hasInstitution = true;
-    // A program lead claims the NEXT line as its institution; mark the chunk a
-    // complete program entry only once that institution line has been consumed.
-    if (isProgramLead) programLeadInstIdx = li + 1;
-    if (li === programLeadInstIdx) hasProgramLead = true;
+  const blocks = parseEntryBlocks({ ...education, lines: entryLines }, cfg);
+  if (blocks.length === 0) return { value: [], confidence: 0 };
+  // `blockStartIdx` is filled by the `anchorIndices` callback above as a side
+  // effect, read back here BY POSITION — correct only because `parseEntryBlocks`
+  // calls that callback exactly once and maps its returned anchors 1:1 to
+  // `blocks`, in the same order. Assert that invariant rather than let a future
+  // divergence (a fold/filter between the callback and the block build) land
+  // every later entry's coursework on entry 0 with no error (PR #1145 review).
+  if (blocks.length !== blockStartIdx.length) {
+    throw new Error(
+      `extractEducation: parseEntryBlocks returned ${blocks.length} block(s) but anchorIndices tracked ${blockStartIdx.length} start indices`,
+    );
   }
-  flush();
 
   // Carry each entry's start line index (its anchor) past the build/filter so
   // coursework can be attributed to it by position.
-  const built = chunks
-    .map((chunk) => ({
-      ...educationFromChunk(chunk.map((c) => c.text)),
-      startIdx: chunk[0].idx,
+  const built = blocks
+    .map((block, i) => ({
+      ...educationFromChunk(block.headerLines),
+      startIdx: blockStartIdx[i],
     }))
     .filter((b) => b.entry.degree || b.entry.institution);
   if (built.length === 0) return { value: [], confidence: 0 };
