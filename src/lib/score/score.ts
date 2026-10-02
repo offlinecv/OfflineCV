@@ -214,6 +214,14 @@ const SPECIFICITY_TARGET_RATIO = 0.6;
 const COMPLETENESS_SUMMARY_MIN_CHARS = 20;
 export const COMPLETENESS_SKILLS_MIN_COUNT = 3;
 
+/** Completeness label for the "no experience section detected" gap. Exported
+ *  so `guidance.ts` can match `completeness.missing` against this constant
+ *  instead of a bare string literal — a bare-string match silently stops
+ *  matching if this label is ever renamed here, reintroducing the double
+ *  "add bullets" / "add work experience" advice the match exists to prevent
+ *  (#1141). */
+export const EXPERIENCE_MISSING_LABEL = "work experience";
+
 // ── Bullet detection helpers ───────────────────────────────────────────────
 
 // Strong-signal patterns — always count as a metric when matched, regardless of
@@ -844,7 +852,10 @@ export interface AnonymousAtsScoreInput {
   claimedBulletKeys?: Iterable<string>;
 }
 
-const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
+/** Exported so `contact.ts`'s display-side floor can read this value directly
+ *  instead of hardcoding its own copy — see `CONTACT_DISPLAY_CONFIDENCE_FLOOR`
+ *  (#1141). */
+export const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
 /** Completeness credit for a phone that parsed but failed libphonenumber isValid(). */
 const PHONE_INVALID_CREDIT = 0.5;
 /** Exported so guidance (#1023) can interpolate the same number into its
@@ -1265,7 +1276,7 @@ export function computeAnonymousAtsScore(
     passed:
       expEntries.length > 0 ||
       (input.sections.byName.get("experience")?.length ?? 0) > 0,
-    label: "work experience",
+    label: EXPERIENCE_MISSING_LABEL,
   });
   completenessChecks.push({
     key: "education",

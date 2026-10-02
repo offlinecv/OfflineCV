@@ -23,6 +23,7 @@ import {
   BULLET_LENGTH_MAX_WORDS,
   BULLET_LENGTH_MIN_WORDS,
   COMPLETENESS_SKILLS_MIN_COUNT,
+  EXPERIENCE_MISSING_LABEL,
   metricBulletsToFullSpecificity,
   type AnonymousAtsScore,
   type BulletObservation,
@@ -413,9 +414,9 @@ function experienceCompletenessItem(
   score: AnonymousAtsScore,
   missing: ReadonlySet<string>,
 ): GuidanceItem | null {
-  if (missing.has("work experience")) {
+  if (missing.has(EXPERIENCE_MISSING_LABEL)) {
     return completenessItem({
-      missingKey: "work experience",
+      missingKey: EXPERIENCE_MISSING_LABEL,
       id: "completeness-experience",
       location: "Experience",
       targetAnchor: SECTION_IDS.experience,
