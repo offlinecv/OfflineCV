@@ -16,13 +16,30 @@
  *         corpus, word-boundary-aware via the same regex shape as the JD
  *         extractor.
  *       · `noun` source: check the literal phrase (lowercased) against the
- *         corpus, word-boundary-aware.
+ *         corpus, word-boundary-aware. If that literal check misses, retry
+ *         ONCE with the phrase's final token swapped for its counterpart from
+ *         an explicit singular/plural pair table — see `corpusMentionsPhrase`
+ *         (#847).
  *   - Weight: skill = 1.0, noun = 0.5. Score is weighted coverage as a
  *     percentage: `sum(coveredWeights) / sum(totalWeights) * 100`.
  *
  * The score is intentionally a single number — the UI does not show it as
  * "X% match" (see CONTRIBUTING.md / copy discipline). The copy is built
  * around the covered/missing counts; the score is the supporting headline.
+ *
+ * Scoring note (#847): the noun pass used to match a JD phrase's literal
+ * string only, so a résumé saying "distributed systems" reported a JD's
+ * "distributed system" as missing on inflection alone — a false miss, not a
+ * real gap. An earlier version of this fix normalized both sides with a
+ * general stemmer (determiner-dropping, suffix rules); that was withdrawn —
+ * each stemming fix opened a new hole (an all-caps résumé skipped stemming
+ * and reintroduced the same false miss; a bare `endsWith("s")` rule turned
+ * exact singular matches like "bias" and "lens" into false misses). A
+ * single-retry swap against an explicit pair table bridges the same
+ * known-good cases without acting on words nobody named, so `score` can come
+ * out higher than before for a pair-table résumé/JD match. That movement is
+ * the false misses going away, not a re-weighting: `SKILL_WEIGHT`/
+ * `NOUN_WEIGHT` are unchanged.
  */
 
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
@@ -174,10 +191,85 @@ function corpusMentionsSkill(corpus: string, canonicalId: string): boolean {
   return re ? re.test(corpus) : false;
 }
 
-function corpusMentionsPhrase(corpus: string, phrase: string): boolean {
+/**
+ * Explicit singular ↔ plural pairs for noun-phrase head words that are known
+ * to cost a false "Missing" on inflection alone (#847). Written out, not
+ * derived from a suffix rule: `responsibility`/`responsibilities` is a
+ * `y`→`ies` change, and a generic `-s`/`-es` rule is exactly what reintroduced
+ * false misses (an all-caps résumé skipping a stemmer) and false matches
+ * (`endsWith("s")` turning "bias"/"lens" into "bia"/"len") in an earlier,
+ * withdrawn version of this fix. An allowlist can't break what it doesn't
+ * name — a phrase whose head isn't in this table gets no swap, and behaves
+ * exactly as the literal match on `main` did.
+ *
+ * Every entry here is a head noun the JD extractor demonstrably emits, not an
+ * invented plural — the comment on each pair names the JD phrase from
+ * `extract-jd-terms.test.ts` it was taken from, so a future trim or addition
+ * can be checked against the same source instead of taken on faith.
+ * `coverage.test.ts` pins this exact set against the list #847 seeds.
+ */
+export const PHRASE_HEAD_INFLECTION_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["system", "systems"], // "Distributed System(s)"
+  ["bias", "biases"],
+  ["lens", "lenses"],
+  ["responsibility", "responsibilities"], // "Key Responsibilities"
+  ["service", "services"], // "Backend Services"
+  ["function", "functions"], // "Essential Functions" / "Cloud Functions"
+  ["qualification", "qualifications"], // "Basic/Minimum/Preferred Qualifications"
+  ["demand", "demands"], // "Physical Demands"
+  ["app", "apps"], // "Info Apps" / "beloved apps"
+  ["team", "teams"], // "Info Apps team" / "engineering team"
+  ["keyword", "keywords"], // "missing keywords" (#156 structural-heading comment)
+];
+
+/** Bidirectional lookup built from the pair table above — singular maps to
+ *  plural and plural maps to singular, so a swap works whichever direction
+ *  the JD phrase and the résumé wording happen to disagree in (#847). */
+const PHRASE_HEAD_PAIRS: ReadonlyMap<string, string> = (() => {
+  const pairs = new Map<string, string>();
+  for (const [singular, plural] of PHRASE_HEAD_INFLECTION_PAIRS) {
+    pairs.set(singular, plural);
+    pairs.set(plural, singular);
+  }
+  return pairs;
+})();
+
+/**
+ * Swap `phrase`'s final word for its counterpart in `PHRASE_HEAD_PAIRS`, or
+ * return `null` if the final word isn't in the table. Only the last word
+ * (the phrase's head noun) is ever swapped — never a middle word — so this
+ * cannot merge two phrases that differ anywhere but their final word.
+ */
+function swapFinalTokenInflection(phrase: string): string | null {
+  const match = /^(.*?)([A-Za-z0-9]+)$/.exec(phrase);
+  if (!match) return null;
+  const [, prefix, lastWord] = match;
+  const swapped = PHRASE_HEAD_PAIRS.get(lastWord.toLowerCase());
+  return swapped === undefined ? null : `${prefix}${swapped}`;
+}
+
+/** Literal, word-boundary-aware phrase match — the same check `main` has
+ *  always used for the noun pass. */
+function literalPhraseMatches(corpus: string, phrase: string): boolean {
   const re = new RegExp(
     `${ALIAS_BOUNDARY_PREFIX}${escapeRegex(phrase.toLowerCase())}${ALIAS_BOUNDARY_SUFFIX}`,
     "i",
   );
   return re.test(corpus);
+}
+
+/**
+ * A noun-pass phrase is "covered" when it appears in the corpus literally,
+ * OR — only when the literal check misses — when it appears after swapping
+ * its final word for the counterpart `PHRASE_HEAD_PAIRS` names (#847). This
+ * credits a résumé's "distributed systems" for a JD's "distributed system",
+ * and the reverse, without touching any word the table doesn't name: "on-call
+ * rotation" still misses against a résumé that only says "production support
+ * rotation" — the earlier words differ and no swap bridges that, nor is it
+ * meant to (#156 is the semantic path for genuinely different wording).
+ */
+function corpusMentionsPhrase(corpus: string, phrase: string): boolean {
+  if (literalPhraseMatches(corpus, phrase)) return true;
+  const swapped = swapFinalTokenInflection(phrase);
+  return swapped !== null && literalPhraseMatches(corpus, swapped);
 }
