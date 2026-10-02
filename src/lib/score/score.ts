@@ -1037,6 +1037,14 @@ function suppressExperienceHeaderBullets(
   );
 }
 
+/**
+ * Score cascade output across specificity, structure, and completeness, then
+ * apply the layout penalty. Accomplishment sections supply the bullet pool;
+ * contact completeness uses the shared confidence floor.
+ *
+ * @param input Parsed fields, confidence, detected sections, text, and layout triggers.
+ * @returns The overall score, dimension breakdowns, missing fields, and bullet observations.
+ */
 export function computeAnonymousAtsScore(
   input: AnonymousAtsScoreInput,
 ): AnonymousAtsScore {
