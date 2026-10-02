@@ -41,10 +41,36 @@ export const COMPANY_SUFFIX_RE =
  * as the title.
  */
 const TITLE_KEYWORDS_RE =
-  /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps|Assistant|Intern|Internship|Trainee|Apprentice|Coordinator|Technician|Representative|Supervisor|Strategist|Advisor|Adviser|Counselor|Recruiter|Accountant|Auditor|Editor|Writer|Producer|Teacher|Instructor|Lecturer|Professor|Tutor|Agent|Clerk|Ambassador|Volunteer|Fellow)\b/i;
+  /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps|Assistant|Intern|Internship|Trainee|Apprentice|Coordinator|Facilitator|Technician|Representative|Supervisor|Strategist|Advisor|Adviser|Counselor|Recruiter|Accountant|Auditor|Editor|Writer|Producer|Teacher|Instructor|Lecturer|Professor|Tutor|Agent|Clerk|Ambassador|Volunteer|Fellow)\b/i;
 
-/** Heuristic: text contains title-like keywords but no company suffix. */
+/** No word characters after a `COMPANY_SUFFIX_RE` match — i.e. the suffix is
+ *  the string's last token, optionally trailing punctuation/whitespace
+ *  ("Acme Group", "Acme Group.", "Acme Group, Inc"'s "Inc" itself). */
+const NO_MORE_WORDS_RE = /^[^a-zA-Z0-9]*$/;
+
+/** `COMPANY_SUFFIX_RE` is deliberately non-global (see its own comment), so
+ *  `looksLikeTitle` needs its own global copy to walk every occurrence —
+ *  "Group Engineering Ltd" has a suffix word at BOTH ends, and checking only
+ *  the first (`Group`) missed the terminal `Ltd` that actually marks it as a
+ *  company, not a title. */
+const COMPANY_SUFFIX_RE_G = new RegExp(COMPANY_SUFFIX_RE.source, `${COMPANY_SUFFIX_RE.flags}g`);
+
+/**
+ * Heuristic: text contains title-like keywords but no DISQUALIFYING company
+ * suffix. A suffix only disqualifies when it sits in suffix position (the
+ * company's last token, e.g. "Acme Group") or when nothing title-shaped
+ * follows it — a bare `COMPANY_SUFFIX_RE` hit elsewhere in the string is also
+ * how "Group Product Manager" and "Systems Engineer" read, where the suffix
+ * word is itself the first word of the title, not the employer's name (#1144).
+ * Every match is checked, not just the first, so a title-shaped word early in
+ * the string can't hide a genuine terminal suffix later in it.
+ */
 export function looksLikeTitle(text: string): boolean {
-  if (COMPANY_SUFFIX_RE.test(text)) return false;
+  for (const suffixMatch of text.matchAll(COMPANY_SUFFIX_RE_G)) {
+    const afterSuffix = text.slice(suffixMatch.index + suffixMatch[0].length);
+    const suffixIsLastToken = NO_MORE_WORDS_RE.test(afterSuffix);
+    const keywordAfterSuffix = TITLE_KEYWORDS_RE.test(afterSuffix);
+    if (suffixIsLastToken || !keywordAfterSuffix) return false;
+  }
   return TITLE_KEYWORDS_RE.test(text);
 }
