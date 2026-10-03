@@ -279,6 +279,23 @@ export interface EditSnapshot {
    * describing the same entry.
    */
   removedEntries?: string[];
+  /**
+   * The #814 one-anchor-rule parking, keyed by {@link roleAnchorKey} for a
+   * parsed role or {@link addedAnchorKey} for an added entry (#819).
+   *
+   * Provenance about the edit SEQUENCE, not a field value — see
+   * `relocatedEndsRef`'s docblock for why it cannot be re-derived from the
+   * entry itself and must be carried explicitly across a restore. NOT a key of
+   * `ExperienceFieldOverrides`: `applyOverrides` never reads this field, and it
+   * is folded back into `end_date` only through a live `setExperienceField`/
+   * `setEntryField` commit.
+   *
+   * Optional: drafts and library records persisted before #819 carry no such
+   * key, and `replay` defaults it to `{}` — the pre-#819 behaviour of forgetting
+   * the parking on restore, degrading to pre-#814 for that one entry rather than
+   * to anything worse.
+   */
+  relocatedEnds?: Record<string, string>;
 }
 
 // ── Added entries + bullets ─────────────────────────────────────────────────
@@ -1052,18 +1069,29 @@ export function useEditableParse(): EditableParse {
    * — so the relocated value is parked here and put back into `end_date` the
    * moment a real start date arrives.
    *
-   * WHY IT IS A REF AND NOT PART OF THE OVERRIDE MAP. This is provenance about
+   * WHY A REF, NOT A PLAIN FIELD ON THE OVERRIDE MAP. This is provenance about
    * the edit SEQUENCE, not a field value: `{start_date: "2022"}` typed into the
    * Start cell and the same pair relocated out of the End cell are identical
    * objects, and only the second is owed a restore (the "does not invent an end
    * date" cases in the repro tests are the ones that fall to the difference). It
-   * is therefore not derivable from `prior` or the resolved entry. Keeping it out
-   * of `ExperienceFieldOverrides` also keeps it out of `EditSnapshot`, which
-   * crosses to `/jobs/` through `jd-fit-handoff.ts` — a session-local editing
-   * affordance has no business widening a persisted payload. The cost is that a
-   * replayed snapshot forgets the parking (`resetAll`/`replay` clear it), which
-   * degrades to the pre-#814 behaviour for that one entry rather than to
-   * anything worse.
+   * is therefore not derivable from `prior` or the resolved entry, and stays out
+   * of `ExperienceFieldOverrides` for the same reason.
+   *
+   * PERSISTED ACROSS RESTORE (#819). The provenance argument above is exactly
+   * why this cannot be RE-DERIVED on `replay` either — dropping it degrades to
+   * pre-#814 behaviour for that one entry, and #819 found that happening on
+   * every restore: a resumed draft and a résumé reloaded from the library both
+   * go through `replay`, and both used to clear this outright.
+   * `EditSnapshot.relocatedEnds` is the persisted mirror; `writeRelocatedEnds`
+   * (below) is the ONE writer of both this ref and that state, so `snapshot`
+   * sees every park/unpark exactly like `addedBulletsRef`/`addedBullets` do
+   * through `writeAddedBullets`, and `replay` loads the field back instead of
+   * clearing it — remapping an ADDED entry's key through the same id-remint
+   * `addedEntries`/`addedBullets` replay already does (an added entry's id is
+   * freshly minted every replay). Before #819 this stayed out of `EditSnapshot`
+   * because that shape once crossed to `/jobs/` through the since-deleted
+   * `jd-fit-handoff.ts` (#576); no cross-lane hop carries an `EditSnapshot`
+   * today, so that reason no longer applies.
    *
    * Read and written OUTSIDE the state updaters, never inside: an updater that
    * both reads and clears this would not be idempotent, and React invokes
@@ -1072,7 +1100,18 @@ export function useEditableParse(): EditableParse {
    * Keys are `roleAnchorKey(index)` for a parsed role's override map and
    * `addedAnchorKey(id)` for an added entry, which cannot collide.
    */
+  const [relocatedEnds, setRelocatedEnds] = useState<Record<string, string>>(
+    {},
+  );
   const relocatedEndsRef = useRef<Record<string, string>>({});
+  /** The one writer of `relocatedEndsRef` / `relocatedEnds` — see the docblock
+   *  above. Both are always written together so a synchronous read inside
+   *  `setExperienceField`/`setEntryField` and the `snapshot` memo it feeds
+   *  never disagree about the current parking. */
+  const writeRelocatedEnds = useCallback((next: Record<string, string>) => {
+    relocatedEndsRef.current = next;
+    setRelocatedEnds(next);
+  }, []);
 
   /**
    * The PARSED (pre-override) `is_current` for a parsed role, keyed by its
@@ -1162,8 +1201,10 @@ export function useEditableParse(): EditableParse {
           relocatedEndsRef.current[key],
         );
         restoredEnd = next.restoredEnd;
-        if (next.parked === undefined) delete relocatedEndsRef.current[key];
-        else relocatedEndsRef.current[key] = next.parked;
+        const nextParking = { ...relocatedEndsRef.current };
+        if (next.parked === undefined) delete nextParking[key];
+        else nextParking[key] = next.parked;
+        writeRelocatedEnds(nextParking);
       }
 
       setExperienceOverrides((prev) => {
@@ -1215,7 +1256,7 @@ export function useEditableParse(): EditableParse {
         return { ...prev, [index]: entry };
       });
     },
-    [],
+    [writeRelocatedEnds],
   );
 
   const setBulletField = useCallback(
@@ -1717,8 +1758,10 @@ export function useEditableParse(): EditableParse {
           relocatedEndsRef.current[key],
         );
         restoredEnd = next.restoredEnd;
-        if (next.parked === undefined) delete relocatedEndsRef.current[key];
-        else relocatedEndsRef.current[key] = next.parked;
+        const nextParking = { ...relocatedEndsRef.current };
+        if (next.parked === undefined) delete nextParking[key];
+        else nextParking[key] = next.parked;
+        writeRelocatedEnds(nextParking);
       }
 
       setAddedEntries((prev) =>
@@ -1741,7 +1784,7 @@ export function useEditableParse(): EditableParse {
         }),
       );
     },
-    [],
+    [writeRelocatedEnds],
   );
 
   const addBullet = useCallback(
@@ -1886,7 +1929,11 @@ export function useEditableParse(): EditableParse {
     setSummaryOverride(undefined);
     setAddedEntries([]);
     // The relocation memory is about entries that no longer exist (#814).
-    relocatedEndsRef.current = {};
+    // Through the writer, so both the ref and the persisted `relocatedEnds`
+    // state are cleared together — otherwise a reset leaves either half
+    // holding the pre-reset parking, and the next date commit or `snapshot`
+    // read would resurrect it.
+    writeRelocatedEnds({});
     // Same reasoning for the PARSED-is_current cache (#686): it is provenance
     // about the parse this hook instance is about to replace, keyed by an
     // index space a new parse redefines. Cleared here, not in `replay` — see
@@ -1897,7 +1944,7 @@ export function useEditableParse(): EditableParse {
     // `addBullet`/`removeBullet` in that same tick would resurrect them.
     writeAddedBullets({});
     setProfileOverrides([]);
-  }, [writeAddedBullets]);
+  }, [writeAddedBullets, writeRelocatedEnds]);
 
   const snapshot = useMemo<EditSnapshot>(
     () => ({
@@ -1915,6 +1962,7 @@ export function useEditableParse(): EditableParse {
       addedBullets,
       profileOverrides,
       removedEntries: [...removedEntries],
+      relocatedEnds,
     }),
     [
       contactOverrides,
@@ -1931,17 +1979,20 @@ export function useEditableParse(): EditableParse {
       addedBullets,
       profileOverrides,
       removedEntries,
+      relocatedEnds,
     ],
   );
 
   const replay = useCallback(
     (snap: EditSnapshot) => {
-      // A snapshot restores a whole edit state, so any value parked from the
-      // state being replaced is provenance about commits this one never made
-      // (#814). Dropping it costs the restore for that entry until its next date
-      // commit re-parks; keeping it would offer a value the snapshot's own pair
-      // never contained.
-      relocatedEndsRef.current = {};
+      // #819: the parking (`relocatedEndsRef`/`relocatedEnds`) is FULLY
+      // REPLACED by `snap.relocatedEnds`, never merged with whatever this
+      // session had parked before the restore — that value is provenance about
+      // commits this one never made, and keeping it would offer a value the
+      // snapshot's own pair never contained. The write itself happens further
+      // down, after the added-entries loop mints the `idMap` an ADDED entry's
+      // key needs to be remapped through (its id is freshly minted every
+      // replay; a `role:` key needs no such remap and carries over verbatim).
 
       (
         Object.entries(snap.contactOverrides) as [
@@ -2043,9 +2094,32 @@ export function useEditableParse(): EditableParse {
         setSummaryField(snap.summaryOverride);
 
       const idMap = new Map<string, string>();
+      // #819/#1136: remapped by reading against an immutable snapshot of the
+      // original parking (`originalRelocatedEnds`) and writing into a
+      // separate fresh map, never against the map being built in place. A
+      // freshly restored hook mints its ids from zero, so the first added
+      // entry can get its OLD id back — remapping in place there meant the
+      // write and the delete landed on the same key, destroying the parking
+      // it had just "moved". Remapping in place also let one entry's
+      // destination key collide with another entry's still-unprocessed
+      // source key when a later entry's old id equalled an earlier entry's
+      // new one.
+      const originalRelocatedEnds = snap.relocatedEnds ?? {};
+      const oldAddedKeys = new Set(
+        snap.addedEntries.map((entry) => addedAnchorKey(entry.id)),
+      );
+      const relocatedEnds: Record<string, string> = {};
+      for (const [key, value] of Object.entries(originalRelocatedEnds)) {
+        if (!oldAddedKeys.has(key)) relocatedEnds[key] = value;
+      }
       for (const entry of snap.addedEntries) {
         const newId = addEntry(entry.section);
         idMap.set(entry.id, newId);
+        const oldParkingKey = addedAnchorKey(entry.id);
+        if (oldParkingKey in originalRelocatedEnds) {
+          relocatedEnds[addedAnchorKey(newId)] =
+            originalRelocatedEnds[oldParkingKey];
+        }
         // Iterates the field tuple AddedEntryField is derived from, so a new
         // editable field cannot be added to the union without also being
         // replayed here — `team` (#425) and `achievementType` (#455) were both
@@ -2055,6 +2129,7 @@ export function useEditableParse(): EditableParse {
           if (value !== undefined) setEntryField(newId, field, value);
         });
       }
+      writeRelocatedEnds(relocatedEnds);
       for (const [entryKey, bullets] of Object.entries(snap.addedBullets)) {
         const mappedKey = idMap.get(entryKey) ?? entryKey;
         bullets.forEach((text) => addBullet(mappedKey, text));
@@ -2096,6 +2171,7 @@ export function useEditableParse(): EditableParse {
       setSummaryField,
       addEntry,
       setEntryField,
+      writeRelocatedEnds,
       addBullet,
       removeEntry,
       setLegacyLink,
