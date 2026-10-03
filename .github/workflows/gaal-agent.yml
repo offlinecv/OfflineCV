@@ -41,6 +41,10 @@
 #      A run that needs a new host fails loudly; add it to `allowed-endpoints`.
 # Status comments use github.token, which fires no events, so they cannot
 # start pr-revise.yml the way an app-token comment would.
+# An issue's assignees are requested as reviewers on its PR (assignment says who
+# reviews, not who may run the agent); CODEOWNERS' automatic request is unchanged.
+# A PR run whose agent step fails (turn limit, timeout, error) skips publishing, so a
+# separate always() step posts the one "stopped, nothing pushed" note instead.
 #
 # `gaal` on an issue means "Gaal is acting on this": a run is going or its PR is
 # open. Whenever that stops being true without the issue closing, the label comes
@@ -348,6 +352,7 @@ jobs:
           } > "$p"
 
       - name: Run Gaal
+        id: agent
         if: steps.prep.outputs.agent == 'true'
         # Under the job's 60: a job timeout cancels everything after it, so this
         # leaves room for the publish and release-label steps to still run.
@@ -451,6 +456,22 @@ jobs:
               --title "$(head -1 "$msg")" --body-file "$body"
           fi
           echo "published=true" >> "$GITHUB_OUTPUT"
+          # Assignment picks the reviewer: request each assignee on the PR, on a new PR
+          # and on a re-run alike (idempotent; picks up a later assignee). The app is the
+          # PR author and cannot review its own PR. Nothing here may fail the step: the
+          # PR is already published, so a refused request is only a warning.
+          if pr=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number,headRepositoryOwner \
+                  --jq "map(select(.headRepositoryOwner.login == \"${REPO%%/*}\")) | .[0].number // empty") \
+             && [ -n "$pr" ] \
+             && assignees=$(gh issue view "$NUMBER" --repo "$REPO" --json assignees --jq '.assignees[].login'); then
+            for login in $assignees; do
+              [ "$login" != "$APP_BOT" ] && [ "$login" != "${APP_BOT%\[bot\]}" ] || continue
+              gh api -X POST "repos/$REPO/pulls/$pr/requested_reviewers" -f "reviewers[]=$login" >/dev/null \
+                || echo "::warning::Could not request review from $login on PR #$pr."
+            done
+          else
+            echo "::warning::Could not look up the PR or #$NUMBER's assignees; no reviewer requested."
+          fi
           # release-on-close may have taken the label off mid-run (an older PR from this
           # branch closed meanwhile). github.token fires no `labeled` event, so putting
           # it back cannot start another run.
@@ -488,6 +509,7 @@ jobs:
       # A revision: the replayed PR plus the agent's edits, folded into the PR's
       # one commit by the same script that replayed it.
       - name: Fold into the PR's commit and push
+        id: fold
         if: steps.gate.outputs.mode == 'pr' && steps.prep.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -531,6 +553,29 @@ jobs:
               exit 1 ;;
             *) echo "::error::unexpected publish result: $result"; exit 1 ;;
           esac
+
+      # The publish step above is skipped when the agent step fails (no always()), and
+      # every PR-mode status note lives in it, so a failed run would be silent. The
+      # publish step posts its own note whenever it runs, so this fires only when it
+      # was skipped. github.token, like note(), so it cannot start pr-revise.yml.
+      - name: Say so when the agent stopped before publishing
+        if: always() && steps.gate.outputs.mode == 'pr' && steps.prep.outputs.agent == 'true' && steps.fold.outcome == 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Only the turn limit is detectable (the action's result record names it); a
+          # step timeout or an action error leaves no reliable marker, so say "stopped".
+          # Match the record, not the text: the transcript holds tool output, which can
+          # quote this very file.
+          reason="stopped"
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ] \
+             && jq -e '[.. | objects | select(.type == "result" and .subtype == "error_max_turns")] | length > 0' "$EXECUTION_FILE" >/dev/null 2>&1; then
+            reason="ran out of turns"
+          fi
+          gh issue comment "$NUMBER" --repo "$REPO" --body "Gaal $reason before it could push ([run]($RUN_URL)), so nothing was pushed. The run's first error says why. Comment \`/gaal\` again with a narrower ask (for example one blocker per comment)."
 
   # A Gaal PR that closes without closing its issue (closed unmerged, or merged
   # as a partial `Refs #N`) leaves nothing acting on the issue, so the label
