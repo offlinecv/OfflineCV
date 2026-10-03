@@ -26,6 +26,10 @@ import { toCanonicalResume } from "./heuristics/canonical.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./heuristics/sections.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
 import type { AnonymousAtsScore } from "./score/score.ts";
+import { computeSavableResult } from "./edit/edit-pipeline.ts";
+import { scoreParsedResume } from "./score/score-cascade.ts";
+import { bulletId } from "./score/bullet-id.ts";
+import { normalizeBulletText } from "./score/group-bullets.ts";
 import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 // The stale-shape guard re-parses from the stored blob via `runCascade`; mock it
@@ -392,6 +396,7 @@ describe("resume-library: pristine base + delta (#768)", () => {
     ({
       marker: "cascade-base-42",
       triggers: [],
+      rawText: "",
       canonical: {
         fields: {},
         sections: { byName: new Map([["skills", 1]]) },
@@ -492,6 +497,17 @@ describe("resume-library: pristine base + delta (#768)", () => {
     // What every backup import produces: JSON turns the `byName` Map into `{}`,
     // and `scoreParsedResume` then throws on `byName.get` mid-restore.
     ["a JSON round-tripped baseResult", () => JSON.parse(JSON.stringify(baseResult()))],
+    // A base missing `rawText` used to slip past `isRestorableDelta` and throw
+    // inside `applyOverrides`' `.split` on load, and `foldUnresolvedOverrides`'s
+    // catch swallowed that into a false all-clear (`unresolved: []`) rather than
+    // degrading the whole record (review, #1131).
+    [
+      "a baseResult missing rawText",
+      () => {
+        const { rawText: _rawText, ...rest } = baseResult();
+        return rest;
+      },
+    ],
   ])("degrades %s to a flat record instead of restoring it (review, #1087)", async (_label, badBase) => {
     const id = await saveResumeToLibrary({
       filename: "imported.pdf",
@@ -623,5 +639,179 @@ describe("resume-library: pristine base + delta (#768)", () => {
     expect(reloaded!.baseResult).toBeUndefined();
     expect(reloaded!.edit).toBeUndefined();
     expect(reloaded!.score.overall).toBe(72);
+  });
+
+  // Step 4 (#769): `loadResumeFromLibrary` folds `edit` over `baseResult` at
+  // load time and exposes what didn't resolve. Unlike `baseResult()` above —
+  // a minimal double `applyOverrides` cannot fold (no `accomplishmentSections`
+  // on its `sections`) — these need a base the fold can actually run against,
+  // so they build one shaped enough for `scoreParsedResume` + `applyOverrides`.
+  describe("unresolved overrides on load (#769)", () => {
+    const A = "Built the ingest pipeline";
+    const B = "Built the ingest pipeline handling 2M events/day";
+
+    /** A canonical-shaped base whose one role carries exactly `bullets`. */
+    function deltaBaseResult(bullets: readonly string[]): CascadeResult {
+      const marked = bullets.map((b) => `• ${b}`);
+      return {
+        canonical: toCanonicalResume(
+          {
+            full_name: "Delta Persona",
+            skills: [],
+            experience: [
+              {
+                title: "Engineer",
+                company: "Acme",
+                start_date: "2020",
+                end_date: "2022",
+                description: bullets.join("\n"),
+              },
+            ],
+            education: [],
+          },
+          {
+            byName: new Map([["experience", marked]]),
+            accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+            source: "regex",
+          },
+          {},
+        ),
+        confidence: 1,
+        triggers: [],
+        suggestedEscalation: "none",
+        tiers: ["t0_layout", "t1_openresume"],
+        rawText: marked.join("\n"),
+        linkAnnotations: [],
+        diagnostics: { rawCharCount: 0, extractedCharCount: 0, pages: 1, elapsedMs: 0 },
+        timings: { t0_layout_ms: 0, t1_openresume_ms: 0 },
+      } as unknown as CascadeResult;
+    }
+
+    /** A delta that edits bullet A to B, keyed by A's content-derived id. */
+    const bulletEditSnapshot = () =>
+      ({
+        contactOverrides: {},
+        experienceOverrides: {},
+        bulletOverrides: { [bulletId(A, 0)]: B },
+        removedBullets: [],
+        educationOverrides: {},
+        skillsOverride: { removed: [], added: [] },
+        addedEntries: [],
+        addedBullets: {},
+      }) as unknown as EditSnapshot;
+
+    it("reproduces the stored result and reports no unresolved overrides when the base has not moved", async () => {
+      const base = deltaBaseResult([A]);
+      const edit = bulletEditSnapshot();
+      // The observations the restore path folds with: App hydrates `done`
+      // with `scoreParsedResume(baseResult)`, so its score's bullets.
+      const observations = (b: CascadeResult) => scoreParsedResume(b).bullets ?? [];
+      const stored = computeSavableResult(base, observations(base), edit);
+
+      const id = await saveResumeToLibrary({
+        filename: "cv.pdf",
+        bytes: bytes().buffer,
+        sourceKind: "pdf",
+        result: stored,
+        score: score(70),
+        baseResult: base,
+        edit,
+      });
+
+      const loaded = await loadResumeFromLibrary(id);
+      expect(loaded!.unresolved).toEqual([]);
+      // The invariant, not the storage round-trip: re-folding the LOADED pair
+      // reproduces the loaded `result`. `loaded.result` alone is just the
+      // stored blob read back, so comparing it to `stored` proves nothing.
+      expect(
+        computeSavableResult(
+          loaded!.baseResult!,
+          observations(loaded!.baseResult!),
+          loaded!.edit!,
+        ),
+      ).toEqual(loaded!.result);
+    });
+
+    it("reports a bullet override the base has since rewritten (delta keyed id(A) -> B, base now holds A′)", async () => {
+      const edit = bulletEditSnapshot();
+      const stored = computeSavableResult(deltaBaseResult([A]), [], edit);
+      // The standard résumé moved on: no line normalises to A any more.
+      const movedBase = deltaBaseResult([
+        "Built the ingest pipeline from scratch",
+      ]);
+
+      const id = await saveResumeToLibrary({
+        filename: "cv.pdf",
+        bytes: bytes().buffer,
+        sourceKind: "pdf",
+        result: stored,
+        score: score(70),
+        baseResult: movedBase,
+        edit,
+      });
+
+      const loaded = await loadResumeFromLibrary(id);
+      expect(loaded!.unresolved).toEqual([
+        {
+          channel: "bulletOverrides",
+          key: bulletId(A, 0),
+          text: normalizeBulletText(A),
+          edited: B,
+        },
+      ]);
+    });
+
+    it("reports a removed-bullet override whose base bullet has since been deleted, with no crash", async () => {
+      const edit = {
+        ...bulletEditSnapshot(),
+        bulletOverrides: {},
+        removedBullets: [bulletId(A, 0)],
+      } as unknown as EditSnapshot;
+      const stored = computeSavableResult(deltaBaseResult([A]), [], edit);
+      const movedBase = deltaBaseResult(["Shipped the dashboard"]);
+
+      const id = await saveResumeToLibrary({
+        filename: "cv.pdf",
+        bytes: bytes().buffer,
+        sourceKind: "pdf",
+        result: stored,
+        score: score(70),
+        baseResult: movedBase,
+        edit,
+      });
+
+      const loaded = await loadResumeFromLibrary(id);
+      expect(loaded!.unresolved).toEqual([
+        {
+          channel: "removedBullets",
+          key: bulletId(A, 0),
+          text: normalizeBulletText(A),
+        },
+      ]);
+    });
+
+    it("is absent for a flat record (no delta)", async () => {
+      const id = await save("legacy.pdf", 58);
+      const loaded = await loadResumeFromLibrary(id);
+      expect(loaded!.unresolved).toBeUndefined();
+    });
+
+    it("is absent for the re-parse recovery branch", async () => {
+      vi.mocked(runCascade).mockResolvedValue(reparsedResult());
+      const rec = await saveResume({
+        filename: "old.pdf",
+        blob: new Blob([bytes().buffer], { type: "application/pdf" }),
+        parse: {
+          result: { parsed: { full_name: "Stale Persona" }, sections: { byName: new Map() } },
+          score: score(41),
+          sourceKind: "pdf",
+          baseResult: deltaBaseResult([A]),
+          edit: bulletEditSnapshot(),
+          // shapeVersion intentionally absent — a pre-#445 record.
+        },
+      });
+      const loaded = await loadResumeFromLibrary(rec.id);
+      expect(loaded!.unresolved).toBeUndefined();
+    });
   });
 });
