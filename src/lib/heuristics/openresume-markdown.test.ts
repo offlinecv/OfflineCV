@@ -288,6 +288,31 @@ describe("parseHeuristicFromMarkdown — real-world DOCX artefacts", () => {
   });
 });
 
+describe("parseHeuristicFromMarkdown — skills geometry-gated wrap join declines on the DOCX lane (#834 follow-up)", () => {
+  it("does not merge a standalone final skill into a preceding comma-list", () => {
+    // Markdown/DOCX pseudo-lines (`markdown-lines.ts`'s `buildLine`) carry no
+    // real PDF geometry (`items: []`, `x: 0`), so Condition B′'s margin check
+    // must decline rather than treat every such line as trivially "at" a
+    // margin of 0 — else it merges a standalone final skill into the
+    // preceding complete comma-list, the exact false-merge #834 fixed.
+    const markdown = [
+      "**Jamie Rivera**",
+      "jamie@example.com | 415-555-0199",
+      "",
+      "**SKILLS**",
+      "",
+      "Python, Go, Rust",
+      "",
+      "Machine Learning",
+    ].join("\n");
+    const result = parseHeuristicFromMarkdown(markdown, markdown);
+    expect(result.parsed.skills).toEqual(
+      expect.arrayContaining(["Python", "Go", "Rust", "Machine Learning"]),
+    );
+    expect(result.parsed.skills).not.toContain("Rust Machine Learning");
+  });
+});
+
 describe("parseHeuristicFromMarkdown — minimal / missing sections", () => {
   it("returns zero-confidence on empty markdown", () => {
     const result = parseHeuristicFromMarkdown("", "");

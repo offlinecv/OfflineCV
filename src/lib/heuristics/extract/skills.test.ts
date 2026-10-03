@@ -379,14 +379,18 @@ describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
 
   // #834: the mirror-image order of the case above — a complete comma-list
   // ("Python, Go, Rust") followed by a standalone final skill that carries no
-  // comma of its own AND is the section's last line ("Machine Learning"). This
-  // is lexically indistinguishable from the actual #834 bug (a comma-list
-  // whose LAST wrap drops its final comma, e.g. "…, gRPC, Distributed" ⏎
-  // "Systems") — both are a short comma-less last line following a pending
-  // fragment that has a comma and doesn't end on one. Locks in that the parser
-  // does NOT merge this case, because any join narrow enough to rejoin the
-  // real bug also rejoins this one — see the Condition B′ writeup in
-  // `isSoftWrapContinuation` (skills.ts) for why no such join was added.
+  // comma of its own ("Machine Learning"). This is LEXICALLY indistinguishable
+  // from the actual #834 bug (a comma-list whose LAST wrap drops its final
+  // comma, e.g. "…, gRPC, Distributed" ⏎ "Systems") — both are a short
+  // comma-less line following a pending fragment that has a comma and doesn't
+  // end on one. What separates the two cases is GEOMETRY, not text: a forced
+  // wrap's pending line runs out to the section's own right margin before it
+  // breaks, while a standalone final skill's preceding line just ends
+  // wherever its content ends. The third SKILLS line below is a much longer
+  // comma-list that establishes a real margin for the section (mkItems widths
+  // are proportional to text length) — "Python, Go, Rust" stays nowhere near
+  // it, so Condition B′ (skills.ts) correctly declines to join it with
+  // "Machine Learning".
   it("does not merge a standalone final skill into a preceding complete comma-list (#834)", () => {
     const items = mkItems([
       { text: "Riley Park", fontSize: 18 },
@@ -395,14 +399,19 @@ describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
       { text: "SKILLS", fontSize: 13 },
       { text: "Python, Go, Rust", fontSize: 10 },
       { text: "Machine Learning", fontSize: 10 },
+      {
+        text: "JavaScript, TypeScript, GraphQL, Terraform, Elasticsearch, RabbitMQ, Prometheus, Grafana",
+        fontSize: 10,
+      },
     ]);
     const pages = mkDefaultPages(items);
     const result = parseHeuristic(items, pages);
 
     expect(result.parsed.skills).toEqual(
-      expect.arrayContaining(["Python", "Go", "Rust", "Machine Learning"]),
+      expect.arrayContaining(["Python", "Go", "Rust", "Machine Learning", "Grafana"]),
     );
     expect(result.parsed.skills).not.toContain("Rust Machine Learning");
+    expect(result.parsed.skills).not.toContain("Machine Learning JavaScript");
   });
 });
 
@@ -627,18 +636,22 @@ describe('parseHeuristic — "Programs, Skills, Software" section, all sub-lines
 // ── Bulleted labelled single-column rows (#465) ──────────────────────────────
 
 /**
- * Build a Skills section from item-level geometry.
+ * Build raw `PdfLine`s from item-level geometry — shared by `skillsLines`
+ * (which wraps the result in a Skills `PdfSection`) and the document-wide
+ * margin tests below (which need plain lines, not sectioned, to stand in for
+ * body text elsewhere in the résumé).
  *
  * The bullet geometry is load-bearing and mirrors what pdfjs emits for a real
  * Word/LaTeX bulleted list: the marker is its own text run at the margin, and
  * the hanging indent behind it arrives as a synthesized blank item wider than
  * the column-spacer floor (`> max(fontSize, 10)`).
  */
-function skillsLines(
+function buildPdfLines(
   rows: Array<Array<{ x: number; str: string; w: number }>>,
-): PdfSection {
-  const lines: PdfLine[] = rows.map((runs, i) => {
-    const y = 300 + i * 13;
+  startY = 300,
+): PdfLine[] {
+  return rows.map((runs, i) => {
+    const y = startY + i * 13;
     const items: PdfTextItem[] = runs.map((r) => ({
       page: 1,
       str: r.str,
@@ -665,7 +678,12 @@ function skillsLines(
       gapAbove: 0,
     };
   });
-  return { name: "skills", lines };
+}
+
+function skillsLines(
+  rows: Array<Array<{ x: number; str: string; w: number }>>,
+): PdfSection {
+  return { name: "skills", lines: buildPdfLines(rows) };
 }
 
 /** The bullet marker (`w: 3.5`) plus its hanging-indent blank (`w: 10.5`, wider
@@ -923,6 +941,210 @@ describe("extractSkills — bulleted labelled single-column rows (#465)", () => 
       "Data analysis",
       "Communication",
     ]);
+  });
+});
+
+// ── Condition B′: the FINAL wrap of a comma-list, geometry-gated (#834) ──────
+
+describe("extractSkills — Condition B′, the final wrap of a comma-list (#834)", () => {
+  it("rejoins the FINAL wrap of a margin-filling comma-list", () => {
+    // Mirrors tests/fixtures/pdfs/unknown/single-word-name-mononym.pdf: the
+    // pending line's right edge runs out to the section's own established
+    // margin (a forced wrap), so the comma-less tail is its continuation, not
+    // a standalone skill. The leading "Agile" line is a comma-less, unrelated
+    // single-column line whose only job is to give the section a SECOND line
+    // (besides the pending one) to establish the margin from — the fix for
+    // #834's follow-up requires at least two OTHER lines to do that, and a
+    // lone pending line can't be one of its own witnesses.
+    const section = skillsLines([
+      [{ x: 60, str: "Agile", w: 450 }],
+      [
+        {
+          x: 60,
+          str: "Python, Go, TypeScript, PostgreSQL, Kafka, Kubernetes, Terraform, AWS, gRPC, Distributed",
+          w: 450,
+        },
+      ],
+      [{ x: 60, str: "Systems", w: 40 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("Distributed Systems");
+    expect(value).not.toContain("Distributed");
+    expect(value).not.toContain("Systems");
+    expect(value).toEqual(
+      expect.arrayContaining(["Python", "Go", "TypeScript", "gRPC"]),
+    );
+  });
+
+  it("does not let a two-line section's wider line establish the margin it is then tested against", () => {
+    // Regression for #834's follow-up: with ONLY two single-column lines,
+    // excluding the pending line (the one under test) leaves a single
+    // remaining line — short of the two-OTHER-lines floor — so the margin is
+    // `undefined` and Condition B′ must decline rather than let the wider of
+    // the two lines (here, the pending one) trivially "reach" itself.
+    const section = skillsLines([
+      [
+        {
+          x: 60,
+          str: "JavaScript, TypeScript, Node.js, React, HTML/CSS, Git",
+          w: 350,
+        },
+      ],
+      [{ x: 60, str: "Docker", w: 40 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("Git");
+    expect(value).toContain("Docker");
+    expect(value).not.toContain("Git Docker");
+  });
+
+  it("does not let a wide pending line clear a single narrow remaining line's margin", () => {
+    // Mirror of the repro above with the widths reversed: here the NEXT line
+    // ("Machine Learning") is the wider of the two, and the pending line
+    // ("Python, Go, Rust") is short. Excluding the pending line still leaves
+    // only one remaining line — short of the two-OTHER-lines floor — so the
+    // margin is `undefined` and Condition B′ must decline rather than let a
+    // comma-less standalone skill get merged just because it happens to be
+    // wide.
+    const section = skillsLines([
+      [{ x: 60, str: "Python, Go, Rust", w: 90 }],
+      [{ x: 60, str: "Machine Learning", w: 300 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("Rust");
+    expect(value).toContain("Machine Learning");
+    expect(value).not.toContain("Rust Machine Learning");
+  });
+
+  it("does not let the pending line's own edge, once it's the widest in scope, clear its own deflated margin", () => {
+    // Regression for #834's follow-up: `marginRightExcluding` only deflates
+    // `marginRight` when the EXCLUDED line is the single widest qualifying
+    // one — which is exactly what happens here, since "Python, Go, Rust" (the
+    // pending line under test) is far wider than both "Agile" and "Machine
+    // Learning". Excluding it drops `marginRight` to the SECOND-widest edge,
+    // but `prevRightEdge` is still the pending line's own (unexcluded) edge —
+    // bigger than `marginRight` by construction, so a lower-bound-only
+    // `runsToMargin` is satisfied no matter how far it overshoots. A
+    // symmetric tolerance band is what actually distinguishes a forced wrap
+    // (runs OUT TO the margin) from this case (runs PAST it by ~250pt).
+    const section = skillsLines([
+      [{ x: 60, str: "Agile", w: 100 }],
+      [{ x: 60, str: "Python, Go, Rust", w: 400 }],
+      [{ x: 60, str: "Machine Learning", w: 150 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("Rust");
+    expect(value).toContain("Machine Learning");
+    expect(value).not.toContain("Rust Machine Learning");
+  });
+
+  it("rejoins a 3+ line wrapped list at every intermediate break (B) and the final one (B′)", () => {
+    // "Front End" straddles the first break (Condition B: the next line still
+    // carries a comma) and "Distributed Systems" straddles the final one
+    // (Condition B′: the pending line's LAST physical line — "…Distributed",
+    // not the first — runs to the section's margin). Both wrapped lines run
+    // out to close to the SAME right edge (within tolerance of each other) —
+    // the realistic shape of two lines actually pushed out by the same column
+    // width, as opposed to one merely-long line with no other witness (#834
+    // follow-up: a symmetric margin band needs a second line that genuinely
+    // corroborates it, not just a narrower one).
+    const section = skillsLines([
+      [{ x: 60, str: "Ruby, Scala, Front", w: 420 }],
+      [{ x: 60, str: "End, Elixir, Swift, Kotlin, Distributed", w: 430 }],
+      [{ x: 60, str: "Systems", w: 40 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toEqual([
+      "Ruby",
+      "Scala",
+      "Front End",
+      "Elixir",
+      "Swift",
+      "Kotlin",
+      "Distributed Systems",
+    ]);
+  });
+});
+
+// ── Document-wide margin, not section-scoped (#834 follow-up) ───────────────
+
+describe("extractSkills — document-wide margin, not section-scoped (#834 follow-up)", () => {
+  // Two ordinary body lines (e.g. summary prose) — NOT in the skills section —
+  // that establish the page's right margin at x=555. Shared by both tests
+  // below: the floor of two OTHER qualifying lines is satisfied purely by
+  // these, so neither test's outcome turns on the floor — only on how close
+  // the pending skills line's own right edge lands to this margin.
+  const otherBodyLines = buildPdfLines(
+    [
+      [
+        {
+          x: 60,
+          str: "Led the platform migration and mentored two engineers through on-call",
+          w: 495,
+        },
+      ],
+      [
+        {
+          x: 60,
+          str: "Shipped the billing rewrite ahead of schedule and under budget this year",
+          w: 490,
+        },
+      ],
+    ],
+    100,
+  );
+
+  it("rejoins the final wrap when the margin comes from body lines elsewhere in the document", () => {
+    // Mirrors `single-word-name-mononym.pdf`: the skills section itself has
+    // only TWO single-column lines (the pending one and its tail), so
+    // excluding the pending line leaves a single remaining line — short of
+    // the two-OTHER-lines floor — and a section-scoped margin can never form
+    // (see the declining two-line tests above, which pass no document lines
+    // for exactly this reason). The right margin is a property of the
+    // document's text column, not of one section, so `otherBodyLines`
+    // establishes it instead, and the pending line's edge (520) lands within
+    // tolerance of it (555).
+    const section = skillsLines([
+      [
+        {
+          x: 60,
+          str: "Python, Go, TypeScript, PostgreSQL, Kafka, Kubernetes, Terraform, AWS, gRPC, Distributed",
+          w: 460,
+        },
+      ],
+      [{ x: 60, str: "Systems", w: 40 }],
+    ]);
+    const documentLines = [...otherBodyLines, ...section.lines];
+
+    const value = extractSkills(section, documentLines).value;
+
+    expect(value).toContain("Distributed Systems");
+    expect(value).not.toContain("Distributed");
+    expect(value).not.toContain("Systems");
+  });
+
+  it("still declines when the pending line falls well short of the document-wide margin", () => {
+    // Same `otherBodyLines` margin (555) as above, so the floor is satisfied
+    // identically — but this pending line is a complete, standalone
+    // comma-list whose own edge (410) is nowhere near that margin. Widening
+    // the margin's SCOPE to the whole document must not widen what counts as
+    // "close enough": "Docker" still declines and stays its own token.
+    const section = skillsLines([
+      [{ x: 60, str: "JavaScript, TypeScript, Node.js, React, HTML/CSS, Git", w: 350 }],
+      [{ x: 60, str: "Docker", w: 40 }],
+    ]);
+    const documentLines = [...otherBodyLines, ...section.lines];
+
+    const value = extractSkills(section, documentLines).value;
+
+    expect(value).toContain("Git");
+    expect(value).toContain("Docker");
+    expect(value).not.toContain("Git Docker");
   });
 });
 
