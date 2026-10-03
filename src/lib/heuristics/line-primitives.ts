@@ -508,6 +508,18 @@ export const BARE_LOCATION_RE = new RegExp(
  *  importing the regex too doesn't add a new edge to the graph. */
 export const TRAILING_SEPARATOR_RE = /[\s,–—\-|·]+$/;
 
+/** Whole-string "City, Region, Country" — a 3-part international location cell
+ *  ("Bengaluru, KA, India") that none of `US_LOCATION_RE` / `INTL_LOCATION_RE`
+ *  (2-part only) cover (#1125). The region token is a SUB-NATIONAL code
+ *  ("KA" for Karnataka, "ON" for Ontario) that varies per country, so — unlike
+ *  `US_STATE_CODE_RE` — there is no closed vocabulary to validate it against;
+ *  the trailing country group still goes through the same `COUNTRY_GAZETTEER`
+ *  closed-vocabulary check every other international branch here uses, which
+ *  is what keeps a coincidental three-comma phrase from full-matching:
+ *  nothing reads as this shape unless its LAST segment is a real country. */
+const INTL_LOCATION_3PART_RE =
+  /^([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2}),\s*([A-Z]{2}),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2})$/;
+
 /**
  * Unwrap a markdown-emphasis pair (`_..._`) that wraps a location, dropping
  * the pair and any trailing separator left dangling after its close, ONLY
@@ -630,13 +642,15 @@ export function resolveBareLocationString(s: string): string | undefined {
   const cleaned = unwrapEmphasisLocation(s);
   const usLoc = US_LOCATION_RE.exec(cleaned);
   const intlLoc = INTL_LOCATION_RE.exec(cleaned);
+  const intl3 = INTL_LOCATION_3PART_RE.exec(cleaned);
   const isBare =
     US_STATE_CODE_RE.test(cleaned) ||
     BARE_LOCATION_RE.test(cleaned) ||
     (usLoc !== null && usLoc[0].length === cleaned.length && US_STATE_CODE_RE.test(usLoc[2])) ||
     (intlLoc !== null &&
       intlLoc[0].length === cleaned.length &&
-      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase()));
+      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase())) ||
+    (intl3 !== null && COUNTRY_GAZETTEER.has(intl3[3].toLowerCase()));
   return isBare ? cleaned : undefined;
 }
 
