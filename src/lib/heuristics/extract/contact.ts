@@ -19,6 +19,10 @@ import {
   INTL_LOCATION_RE,
 } from "../regex.ts";
 import { escapeRegex } from "../../jd-match/regex-utils.ts";
+import {
+  isAddressShapedLine,
+  extractLocalityFromAddressLine,
+} from "../line-primitives.ts";
 import { findFirstPhone, regionFromLocation } from "../phone.ts";
 import { firstMatch, allMatches, isStandaloneUrl } from "./shared.ts";
 import {
@@ -282,10 +286,35 @@ const PORTFOLIO_WEBSITE_BAND_TO_PROFILE = true;
  */
 function extractLocation(lines: PdfLine[]): string | undefined {
   for (const line of lines) {
+    if (isAddressShapedLine(line.text)) {
+      // An address-shaped line: pull the locality from its own tail instead
+      // of applying US_LOCATION_RE to the whole line (see the doc-comments
+      // above). US-only here — an international match on this line's tail
+      // must wait for the international pass below, or it would resolve
+      // before a later plain "City, ST" line ever gets a US-pass look,
+      // inverting the US-before-international priority this function
+      // documents. Skip to the next candidate line rather than falling
+      // through to the greedy match below, which is exactly the
+      // junk-substring bug this guards against.
+      const locality = extractLocalityFromAddressLine(line.text, false);
+      if (locality) return locality;
+      continue;
+    }
     const us = US_LOCATION_RE.exec(line.text);
     if (us) return us[0];
   }
   for (const line of lines) {
+    if (isAddressShapedLine(line.text)) {
+      // Second chance for an address line the US-only pass above couldn't
+      // resolve: now the international fallback is allowed.
+      const locality = extractLocalityFromAddressLine(line.text, true);
+      if (locality) return locality;
+      continue;
+    }
+    // An address-shaped line was already handled above (the `continue`), so
+    // reaching here means a plain line. Apply `INTL_LOCATION_RE` to the whole
+    // line directly — the whole-line greedy match an address-shaped line's
+    // own branch above deliberately avoids (#837).
     const intl = INTL_LOCATION_RE.exec(line.text);
     if (intl && !/@/.test(intl[0])) return intl[0];
   }
