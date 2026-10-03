@@ -1331,143 +1331,177 @@ function stripInstitutionGrade(s: string): string {
   return stripped || s;
 }
 
-/** Map one education chunk (the degree + institution + date lines of a single
- *  qualification) to a `ResumeEducation` and its confidence. */
-function educationFromChunk(chunk: string[]): {
-  entry: ResumeEducation;
-  score: number;
+/** Degree line + the degree/field parsed off it — the "degree/field" concern
+ *  `educationFromChunk` resolves before deciding how to find the institution.
+ *  Parsed off the specific degree-bearing line (cleaner than the joined
+ *  chunk, whose " | " separators would confuse the field tail). #462/#467 —
+ *  gated on `isRealEntryHeader` so a chunk that happens to contain a
+ *  sub-labelled body-prose line ("Achievements: Graduated B.E. with
+ *  Distinction") pooled from a mis-routed compound header never lets that
+ *  line's incidental `DEGREE_RE` substring become the entry's degree. */
+function degreeAndFieldOfChunk(chunk: string[]): {
+  degreeLine: string | undefined;
+  degree: string;
+  field?: string;
 } {
-  const joined = chunk.join(" | ");
-  // Parse degree + field off the specific degree-bearing line (cleaner than the
-  // joined chunk, whose " | " separators would confuse the field tail).
-  // #462/#467 — apply the same `isRealEntryHeader` guard that gates chunking:
-  // a chunk that happens to contain a sub-labelled body-prose line ("Achievements:
-  // Graduated B.E. with Distinction") pooled from a mis-routed compound header
-  // must NOT let that line's incidental DEGREE_RE/INSTITUTION_HINTS substring
-  // become the entry's degree or institution field.
   const degreeLine = chunk.find(
     (l) => DEGREE_RE.test(l) && isRealEntryHeader(l),
   );
-  const degreeMatch = DEGREE_RE.exec(joined);
-  let { degree, field } = degreeLine
+  const { degree, field } = degreeLine
     ? parseDegreeAndField(degreeLine)
     : { degree: "", field: undefined as string | undefined };
+  return { degreeLine, degree, field };
+}
 
-  // Degree-less PROGRAM ENTRY (#238): a program/certificate title carrying its
-  // own inline year, followed by its institution line — recognized by SHAPE, not
-  // a degree keyword. The program title is the subject (`field`); the institution
-  // is the following line; there is no credential, so `degree` stays empty. Done
-  // before the generic institution scan so the program title is NOT mistaken for
-  // the institution (the first non-degree, non-date line). Scoped to a chunk with
-  // no degree line so a normal degree entry is untouched.
-  let institution = "";
-  if (!degreeLine && chunk.length >= 2 && isProgramLeadAt(
-    chunk.map((text) => ({ text })),
-    0,
-  )) {
-    field = cleanField(chunk[0]) ?? field;
-    institution = chunk[1].trim();
-  } else {
-    // Institution: an explicit institution-hint line first; else the first line
-    // that is neither the degree-bearing line nor a bare date — this recovers
-    // acronym schools ("MIT", "UC Berkeley") that carry no "University"/"College"
-    // word; else strip the degree off its own line (degree + school on one line).
-    // Prefer a hint line that is NOT the degree header: when the reconstructed
-    // header carries the degree AND an institution hint (parse-1 pollution,
-    // #297), the true institution is on the following sub-line — read it from
-    // there, not the degree header. Falls back to the header's own hint for a
-    // single-line "Degree, University" entry.
-    const instLine =
-      chunk.find(
-        (l) =>
-          INSTITUTION_HINTS.test(l) &&
-          l !== degreeLine &&
-          isRealEntryHeader(l),
-      ) ??
-      chunk.find(
-        (l) => INSTITUTION_HINTS.test(l) && isRealEntryHeader(l),
-      );
-    if (instLine) {
-      // #364 — when the ONLY institution-hint match is the same one-line
-      // "Degree — Institution" as the degree line, the raw line used to be
-      // stored verbatim ("B.S. in Computer Science — State University") AND
-      // parseDegreeAndField swallowed the institution into `field` ("Computer
-      // Science — State University"), producing a doubled render in the
-      // reconstructed view. Split at the em/en-dash separator so the trailing
-      // half is the institution and re-parse degree/field off the head.
-      if (instLine === degreeLine && degreeMatch) {
-        // Peel any trailing date range off the one-line entry FIRST, so an
-        // en/em-dash INSIDE the date range ("… University Aug 2021 – May 2025",
-        // #506) is never mistaken for the degree↔institution separator. Without
-        // this the split below cut the entry on the date's en-dash, burying the
-        // credential in `institution` and re-parsing degree/field from the bare
-        // end-date ("May 2025") — degree came back empty. `stripInstitutionDate`
-        // runs again downstream (line ~768); it is idempotent.
-        const instNoDate = stripInstitutionDate(instLine);
-        // En/em-dash only — a spaced ASCII `-` commonly separates degree from
-        // field ("B.S. - Computer Science, Stanford University"), not
-        // institution from the rest, so splitting on it here would strand the
-        // field on the wrong side of the boundary.
-        const parts = instNoDate.split(/\s+[–—]\s+/);
-        if (parts.length >= 2) {
-          // Pick the part carrying an institution hint ("University", "College",
-          // …) as the institution. If none carries a hint, fall back to the
-          // last part (the #364 primary shape "Degree in Field — Institution"
-          // where the hint might be missing on an acronym school). Re-parse
-          // degree/field from the remaining parts joined back with em-dash.
-          const hintIdx = parts.findIndex((p) => INSTITUTION_HINTS.test(p));
-          const instIdx = hintIdx >= 0 ? hintIdx : parts.length - 1;
-          institution = parts[instIdx].trim();
-          const head = parts.filter((_, i) => i !== instIdx).join(" — ");
-          ({ degree, field } = parseDegreeAndField(head));
-        } else {
-          // No em/en-dash separator. Try a COMMA separator
-          // "<Degree Field>, <Institution>" (#506) — the shape "M.S. Data
-          // Science, Example State University". Split on commas and take the run
-          // from the FIRST hint-bearing part onward as the institution, so a
-          // comma INSIDE the institution name ("University of California,
-          // Berkeley") is preserved, re-parsing degree/field off the head.
-          // Gated on a hint part existing AT INDEX ≥ 1, so there is a non-empty
-          // "<Degree Field>" head before it to re-parse. `cHintIdx === 0` means
-          // the line LEADS with the institution ("State University Boston, MA",
-          // no degree prefix) — there is nothing to split off, so it falls to the
-          // raw-line fallback unchanged rather than nuke degree/field to empty.
-          // An acronym-school single-line entry ("B.S. Computer Science, MIT")
-          // carries no hint and likewise falls through untouched.
-          const commaParts = instNoDate.split(/\s*,\s*/);
-          const cHintIdx = commaParts.findIndex((p) => INSTITUTION_HINTS.test(p));
-          if (cHintIdx >= 1) {
-            institution = commaParts.slice(cHintIdx).join(", ").trim();
-            const head = commaParts.slice(0, cHintIdx).join(", ");
-            ({ degree, field } = parseDegreeAndField(head));
-          } else {
-            // Keep the (date-stripped) raw line as the institution (behavior
-            // preserved from before #364; the strip-then-maybe-mangle path only
-            // pays off when the split cleanly isolates the institution).
-            institution = instNoDate.trim();
-          }
-        }
-      } else {
-        institution = instLine.trim();
-      }
-    } else {
-      const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
-      if (cand) {
-        institution = cand.trim();
-      } else if (degreeMatch) {
-        institution = joined
-          .replace(degreeMatch[0], "")
-          .replace(/\s*\|\s*/g, " ")
-          .replace(/[,|]+$/, "")
-          .trim();
-      }
-    }
+/** Degree-less PROGRAM ENTRY branch of `educationFromChunk` (#238): a
+ *  program/certificate title carrying its own inline year, followed by its
+ *  institution line — recognized by SHAPE, not a degree keyword. The program
+ *  title is the subject (`field`); the institution is the following line;
+ *  there is no credential. Returns `null` when the chunk doesn't open this
+ *  way (too few lines, or not this shape), so the caller falls through to
+ *  {@link institutionAndDegreeOfChunk}. */
+function programLeadFieldsOfChunk(
+  chunk: string[],
+): { field?: string; institution: string } | null {
+  if (chunk.length < 2 || !isProgramLeadAt(chunk.map((text) => ({ text })), 0))
+    return null;
+  return { field: cleanField(chunk[0]), institution: chunk[1].trim() };
+}
+
+/**
+ * Split a degree and institution that share ONE line ("B.S. in Computer
+ * Science — State University", #364) — the same-line sub-concern of
+ * `institutionAndDegreeOfChunk`'s institution-hint branch. When the ONLY
+ * institution-hint match is the same one-line "Degree — Institution" as the
+ * degree line, the raw line used to be stored verbatim AND
+ * `parseDegreeAndField` swallowed the institution into `field` ("Computer
+ * Science — State University"), producing a doubled render in the
+ * reconstructed view. Splits at a separator so the trailing half is the
+ * institution and re-parses degree/field off the head; falls back to the
+ * (date-stripped) raw line as the institution, matching pre-#364 behavior,
+ * when no separator cleanly isolates one.
+ */
+function splitSharedDegreeInstitutionLine(
+  instLine: string,
+  fallbackDegree: string,
+  fallbackField: string | undefined,
+): { institution: string; degree: string; field?: string } {
+  // Peel any trailing date range off the one-line entry FIRST, so an em/en-dash
+  // INSIDE the date range ("… University Aug 2021 – May 2025", #506) is never
+  // mistaken for the degree↔institution separator. Without this the split
+  // below cut the entry on the date's en-dash, burying the credential in
+  // `institution` and re-parsing degree/field from the bare end-date
+  // ("May 2025") — degree came back empty. `stripInstitutionDate` runs again
+  // downstream (in `cleanInstitutionField`); it is idempotent.
+  const instNoDate = stripInstitutionDate(instLine);
+  // En/em-dash only — a spaced ASCII `-` commonly separates degree from field
+  // ("B.S. - Computer Science, Stanford University"), not institution from the
+  // rest, so splitting on it here would strand the field on the wrong side of
+  // the boundary.
+  const parts = instNoDate.split(/\s+[–—]\s+/);
+  if (parts.length >= 2) {
+    // Pick the part carrying an institution hint ("University", "College", …)
+    // as the institution. If none carries a hint, fall back to the last part
+    // (the #364 primary shape "Degree in Field — Institution" where the hint
+    // might be missing on an acronym school). Re-parse degree/field from the
+    // remaining parts joined back with em-dash.
+    const hintIdx = parts.findIndex((p) => INSTITUTION_HINTS.test(p));
+    const instIdx = hintIdx >= 0 ? hintIdx : parts.length - 1;
+    const institution = parts[instIdx].trim();
+    const head = parts.filter((_, i) => i !== instIdx).join(" — ");
+    const { degree, field } = parseDegreeAndField(head);
+    return { institution, degree, field };
+  }
+  // No em/en-dash separator. Try a COMMA separator "<Degree Field>,
+  // <Institution>" (#506) — the shape "M.S. Data Science, Example State
+  // University". Split on commas and take the run from the FIRST hint-bearing
+  // part onward as the institution, so a comma INSIDE the institution name
+  // ("University of California, Berkeley") is preserved, re-parsing
+  // degree/field off the head. Gated on a hint part existing AT INDEX ≥ 1, so
+  // there is a non-empty "<Degree Field>" head before it to re-parse.
+  // `cHintIdx === 0` means the line LEADS with the institution ("State
+  // University Boston, MA", no degree prefix) — there is nothing to split off,
+  // so it falls to the raw-line fallback unchanged rather than nuke
+  // degree/field to empty. An acronym-school single-line entry ("B.S. Computer
+  // Science, MIT") carries no hint and likewise falls through untouched.
+  const commaParts = instNoDate.split(/\s*,\s*/);
+  const cHintIdx = commaParts.findIndex((p) => INSTITUTION_HINTS.test(p));
+  if (cHintIdx >= 1) {
+    const institution = commaParts.slice(cHintIdx).join(", ").trim();
+    const head = commaParts.slice(0, cHintIdx).join(", ");
+    const { degree, field } = parseDegreeAndField(head);
+    return { institution, degree, field };
+  }
+  // Keep the (date-stripped) raw line as the institution (behavior preserved
+  // from before #364; the strip-then-maybe-mangle path only pays off when the
+  // split cleanly isolates the institution).
+  return { institution: instNoDate.trim(), degree: fallbackDegree, field: fallbackField };
+}
+
+/**
+ * Institution (and, when the line is shared with the degree header, a
+ * re-parsed degree/field) for a chunk that is NOT a degree-less program lead
+ * — the "institution-lead branch" of `educationFromChunk`. Re-joins the
+ * chunk with `" | "` ("join-and-reparse"): {@link degreeAndFieldOfChunk}
+ * already parsed the degree line on its own, but the raw-line fallback at
+ * the bottom of this function needs a single `DEGREE_RE` match over the
+ * WHOLE chunk to cut the institution out of.
+ */
+function institutionAndDegreeOfChunk(
+  chunk: string[],
+  degreeLine: string | undefined,
+  degree: string,
+  field: string | undefined,
+): { institution: string; degree: string; field?: string } {
+  const joined = chunk.join(" | ");
+  const degreeMatch = DEGREE_RE.exec(joined);
+
+  // Institution: an explicit institution-hint line first; else the first line
+  // that is neither the degree-bearing line nor a bare date — this recovers
+  // acronym schools ("MIT", "UC Berkeley") that carry no "University"/"College"
+  // word; else strip the degree off its own line (degree + school on one line).
+  // Prefer a hint line that is NOT the degree header: when the reconstructed
+  // header carries the degree AND an institution hint (parse-1 pollution,
+  // #297), the true institution is on the following sub-line — read it from
+  // there, not the degree header. Falls back to the header's own hint for a
+  // single-line "Degree, University" entry.
+  const instLine =
+    chunk.find(
+      (l) =>
+        INSTITUTION_HINTS.test(l) && l !== degreeLine && isRealEntryHeader(l),
+    ) ?? chunk.find((l) => INSTITUTION_HINTS.test(l) && isRealEntryHeader(l));
+
+  if (!instLine) {
+    const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
+    if (cand) return { institution: cand.trim(), degree, field };
+    if (!degreeMatch) return { institution: "", degree, field };
+    const institution = joined
+      .replace(degreeMatch[0], "")
+      .replace(/\s*\|\s*/g, " ")
+      .replace(/[,|]+$/, "")
+      .trim();
+    return { institution, degree, field };
   }
 
+  if (instLine === degreeLine && degreeMatch) {
+    return splitSharedDegreeInstitutionLine(instLine, degree, field);
+  }
+  return { institution: instLine.trim(), degree, field };
+}
+
+/** Peel every trailing residue class off a raw institution string — date,
+ *  GPA/CGPA note, "City, ST"/"City, Country" location, and a dangling
+ *  pipe-delimited date tail — and surface the location separately. Order
+ *  matters: a glued trailing date would otherwise block the `$`-anchored
+ *  location strip. */
+function cleanInstitutionField(raw: string): {
+  institution: string;
+  location?: string;
+} {
   // Peel a trailing date range off the institution first (a one-line
   // "Institution  Dates" shape, e.g. the reconstructed-résumé emitter, #291),
   // otherwise the date blocks the $-anchored location strip below.
-  institution = stripInstitutionDate(institution);
+  let institution = stripInstitutionDate(raw);
 
   // Peel a trailing GPA/CGPA note glued on with no comma boundary
   // ("… State University GPA 3.8", #556) — otherwise it rides into the school
@@ -1480,17 +1514,16 @@ function educationFromChunk(chunk: string[]): {
   // location, location surfaced separately).
   const { institution: instClean, location } =
     stripInstitutionLocation(institution);
-  institution = instClean;
 
   // Strip a trailing run of pipe-delimited date / empty segments glued onto the
   // institution by a one-line "Institution (…) | <dates> |" header — the dates
-  // are parsed into their own fields below, so a "| 2019-2021" or bare "|" tail
-  // is residue, not part of the school name. Each group is a `|` followed by an
-  // OPTIONAL year-range, so a genuine "| City" tail (a location, owned by
+  // are parsed into their own fields separately, so a "| 2019-2021" or bare "|"
+  // tail is residue, not part of the school name. Each group is a `|` followed
+  // by an OPTIONAL year-range, so a genuine "| City" tail (a location, owned by
   // `stripInstitutionLocation`) does NOT match and is left intact. A real
   // institution never ends in a bare separator, so the final dangling-separator
   // trim only ever removes the artifact.
-  institution = institution
+  institution = instClean
     .replace(
       /(\s*\|\s*(?:(?:19|20)\d{2}(?:\s*[-–—]\s*(?:(?:19|20)\d{2}|present))?)?)+\s*$/i,
       "",
@@ -1498,23 +1531,83 @@ function educationFromChunk(chunk: string[]): {
     .replace(/[\s|,·–—-]+$/, "")
     .trim();
 
-  // Shared date primitive (via the education wrapper) so a range like
-  // "Sep 2024 - July 2025" keeps both halves and a lone graduation date lands in
-  // `end_date` (#97). Filter honors/awards annotation lines first (#371) so a
-  // range on a "Dean's List 2015–2017" sub-line does not steal the primary date
-  // slot from the real graduation year on a sibling line.
+  return { institution, location };
+}
+
+/** Chunk-level date parse feeding both `score` and the entry's date fields —
+ *  the "dates" concern. Shared date primitive (via the education wrapper) so
+ *  a range like "Sep 2024 - July 2025" keeps both halves and a lone
+ *  graduation date lands in `end_date` (#97). Filters honors/awards
+ *  annotation lines first (#371) so a range on a "Dean's List 2015–2017"
+ *  sub-line does not steal the primary date slot from the real graduation
+ *  year on a sibling line. */
+function datesOfChunk(chunk: string[]): {
+  dates: ReturnType<typeof parseEducationDates>;
+  hasDate: boolean;
+} {
   const datesInput = filterAnnotationLinesForDates(chunk).join(" | ");
   const dates = parseEducationDates(datesInput);
-  const hasDate = !!(dates.start_date || dates.end_date);
+  return { dates, hasDate: !!(dates.start_date || dates.end_date) };
+}
 
-  // Grade + honors (#883). Read off the WHOLE chunk, not just the degree line:
-  // a résumé writes them either inline after the subject ("B.S. in Computer
-  // Science, cum laude, GPA: 3.72/4.00") or on their own annotation line under
-  // the entry, and both belong to the same qualification. They contribute
-  // nothing to `score` — the confidence weights are the three fields an entry
-  // must have (institution / degree / date), and an entry is no more or less
-  // confidently parsed for carrying a GPA.
+/** Build the conditional `gpa`/`honors` spread for a chunk (#883) — the
+ *  "grade note" concern, mirroring {@link educationDateFields}'s "omit absent
+ *  fields" contract. Read off the WHOLE chunk, not just the degree line: a
+ *  résumé writes grade/honors either inline after the subject ("B.S. in
+ *  Computer Science, cum laude, GPA: 3.72/4.00") or on their own annotation
+ *  line under the entry, and both belong to the same qualification. They
+ *  contribute nothing to `score` — the confidence weights are the three
+ *  fields an entry must have (institution / degree / date), and an entry is
+ *  no more or less confidently parsed for carrying a GPA. */
+function gradeFieldsOfChunk(chunk: string[]): Partial<ResumeEducation> {
   const { gpa, honors } = parseEducationGrade(chunk);
+  return {
+    ...(gpa ? { gpa } : {}),
+    ...(honors ? { honors } : {}),
+  };
+}
+
+/** Map one education chunk (the degree + institution + date lines of a
+ *  single qualification) to a `ResumeEducation` and its confidence. Each
+ *  concern — degree/field, the degree-less program-lead branch, the
+ *  institution-lead branch, institution cleanup, dates, grade/honors — is its
+ *  own helper above, each taking the chunk lines (or the pieces it needs) and
+ *  returning its result rather than sharing mutable state (#914). */
+function educationFromChunk(chunk: string[]): {
+  entry: ResumeEducation;
+  score: number;
+} {
+  const {
+    degreeLine,
+    degree: parsedDegree,
+    field: parsedField,
+  } = degreeAndFieldOfChunk(chunk);
+  let degree = parsedDegree;
+  let field = parsedField;
+
+  // Done before the generic institution scan so a degree-less program title
+  // is NOT mistaken for the institution (the first non-degree, non-date
+  // line). Scoped to a chunk with no degree line so a normal degree entry is
+  // untouched.
+  const programLead = degreeLine ? null : programLeadFieldsOfChunk(chunk);
+  let institution: string;
+  if (programLead) {
+    field = programLead.field ?? field;
+    institution = programLead.institution;
+  } else {
+    ({ institution, degree, field } = institutionAndDegreeOfChunk(
+      chunk,
+      degreeLine,
+      degree,
+      field,
+    ));
+  }
+
+  const cleaned = cleanInstitutionField(institution);
+  institution = cleaned.institution;
+  const location = cleaned.location;
+
+  const { dates, hasDate } = datesOfChunk(chunk);
 
   let score = 0;
   if (institution) score += 0.3;
@@ -1527,8 +1620,7 @@ function educationFromChunk(chunk: string[]): {
       degree,
       ...(field ? { field } : {}),
       ...(location ? { location } : {}),
-      ...(gpa ? { gpa } : {}),
-      ...(honors ? { honors } : {}),
+      ...gradeFieldsOfChunk(chunk),
       ...educationDateFields(dates),
     },
     score: Math.min(score, 1),
@@ -1660,29 +1752,112 @@ function collectEducationAnchors(lines: { text: string }[]): number[] {
   return anchors;
 }
 
-export function extractEducation(
-  education: PdfSection | undefined,
-): { value: ResumeEducation[]; confidence: number } {
-  if (!education || education.lines.length === 0)
-    return { value: [], confidence: 0 };
+/**
+ * Absorb at most ONE wrapped continuation line onto a coursework bullet
+ * starting at index `i` — the wrap-join sub-concern of
+ * `collectEducationCoursework` (#184). A wrapped grid cell almost never
+ * spills past one line; the single-line cap plus the opt-in
+ * `isCourseworkContinuation` guard stop this from swallowing an acronym
+ * school or trailing prose (`GPA: 3.8`) from the next entry into the prior
+ * course.
+ *
+ * `isCourseworkContinuation` alone missed a Title-case, hint-less, non-
+ * acronym school ("Georgia Tech") immediately after a coursework bullet —
+ * its guards reject only DEGREE_RE/INSTITUTION_HINTS/date-only lines and an
+ * all-caps acronym token, none of which "Georgia Tech" trips, so it read as
+ * a wrapped continuation and swallowed the next entry's institution whole
+ * (#882 review). `isInstitutionLeadAt` is the segmenter's own predicate for
+ * exactly this shape (a dated header followed by a degree line); decline the
+ * absorb whenever the candidate line satisfies it, regardless of what
+ * `isCourseworkContinuation` says.
+ *
+ * Returns the (possibly extended) item text, the source-line indices it
+ * spans, and the index to resume scanning from.
+ */
+function absorbCourseworkContinuation(
+  ls: PdfLine[],
+  i: number,
+  item: string,
+): { item: string; span: number[]; next: number } {
+  const span = [i];
+  let j = i + 1;
+  if (
+    j < ls.length &&
+    !isBulletLine(ls[j]) &&
+    isCourseworkContinuation(ls[j].text) &&
+    !isInstitutionLeadAt(ls, j)
+  ) {
+    item += ` ${ls[j].text.trim()}`;
+    span.push(j);
+    j++;
+  }
+  return { item: item.trim(), span, next: j };
+}
 
-  // Bullet lines inside an education section are relevant-coursework items
-  // (a "Relevant Coursework" block, #164) — not degree/institution lines, so
-  // they were dropped before. Recover them as coursework and attribute each to
-  // the entry it sits under by line position (#190); a section with one entry
-  // reduces to the original "attach to the primary entry" behavior.
-  //
-  // Two wrinkles from real grids (the de-interleaved 3-column reproducer):
-  //   - A cell can wrap: "● Global Dimensions of" + a following non-bullet
-  //     "Business" line. The continuation is joined back into the item and
-  //     excluded from entry detection (`consumed`) so it is not mistaken for
-  //     an institution.
-  //   - A degree sub-note ("-including courses taught in Japanese") is also a
-  //     bullet but reads as lowercase prose, not a course title. The Title-case
-  //     guard drops it; course titles lead uppercase.
-  // Each recovered course keeps the source-line `idx` so it can be attributed
-  // to the nearest preceding degree below.
-  const ls = education.lines;
+/**
+ * Normalize one recovered coursework bullet's (already wrap-joined) text
+ * into its comma-split course titles plus any trailing attendance date — the
+ * label-strip/tail-date/comma-split sub-concern of
+ * `collectEducationCoursework`. Returns `null` when the Title-case admission
+ * guard rejects the bullet (lowercase prose, not a course title, e.g.
+ * "- including courses taught in Japanese").
+ */
+function splitCourseworkItem(
+  rawItem: string,
+): { items: string[]; tailDate: string | null } | null {
+  // Peel a leading source-side label ("Coursework:", "Relevant Coursework:",
+  // "Incoming Courses:", "Selected Courses:", "Courses:") so the residue is
+  // the course list itself and the reconstructed résumé doesn't render a
+  // redundant "Coursework: Relevant Coursework: …" double-label (#367).
+  let item = rawItem.replace(COURSEWORK_LABEL_RE, "").trim();
+  // Peel a trailing attendance-date range that rode at the END of the
+  // coursework line ("… Data Mining. Aug 2023 – May 2025", #555) so the date
+  // is not surfaced as a phantom last course, and remember it to attribute to
+  // this entry below (the coursework line is `consumed`, so it never reaches
+  // the chunk's own date parse).
+  const tailDate = trailingAttendanceDate(item);
+  item = item.replace(TRAILING_ATTENDANCE_DATE_RE, "").trim();
+  // Split a comma-separated course list into individual entries so each
+  // course is addressable in the reconstructed view (#367). A single-course
+  // bullet with no comma remains one entry. The Title-case guard runs on the
+  // FIRST item only (matching pre-split whole-bullet semantics): a lowercase
+  // prose bullet is dropped, but a mid-list lowercase course ("Coursework:
+  // Data Structures, algorithms, Operating Systems") is kept alongside its
+  // Title-case siblings rather than silently dropped.
+  const items = item.includes(",")
+    ? item.split(/\s*,\s*/).filter((t) => t.length > 0)
+    : [item];
+  if (items.length === 0 || !/^[A-Z0-9]/.test(items[0])) return null;
+  return { items, tailDate: tailDate || null };
+}
+
+/**
+ * Recover "Relevant Coursework" bullet items (and any attendance date riding
+ * at the tail of one) from an education section before entry segmentation
+ * runs — the coursework line-wrap prepass (#914). Bullet lines inside an
+ * education section are relevant-coursework items (a "Relevant Coursework"
+ * block, #164) — not degree/institution lines — so they have to be pulled out
+ * and set aside first; {@link attributeCourseworkToEntries} attaches each one
+ * to the entry it sits under by line position (#190).
+ *
+ * Two wrinkles from real grids (the de-interleaved 3-column reproducer):
+ *   - A cell can wrap: "● Global Dimensions of" + a following non-bullet
+ *     "Business" line. The continuation is joined back into the item and
+ *     excluded from entry detection (`consumed`) so it is not mistaken for
+ *     an institution.
+ *   - A degree sub-note ("-including courses taught in Japanese") is also a
+ *     bullet but reads as lowercase prose, not a course title. The Title-case
+ *     guard drops it; course titles lead uppercase.
+ *
+ * Returns the recovered coursework and tail-dates, each tagged with its
+ * source-line `idx`, plus the set of line indices consumed — so the caller
+ * excludes them from entry detection.
+ */
+function collectEducationCoursework(ls: PdfLine[]): {
+  coursework: { text: string; idx: number }[];
+  courseworkDates: { date: string; idx: number }[];
+  consumed: Set<number>;
+} {
   const coursework: { text: string; idx: number }[] = [];
   // A real attendance-date range peeled off the END of a coursework line (#555),
   // tagged with the source-line `idx` so it can be attributed to the same entry
@@ -1696,71 +1871,45 @@ export function extractEducation(
     // below and is silently dropped. `stripBullet` is a no-op on a glyph-less
     // line, so the bullet path is unaffected.
     if (!isBulletLine(ls[i]) && !COURSEWORK_LABEL_RE.test(ls[i].text)) continue;
-    let item = stripBullet(ls[i].text);
-    const span = [i];
-    let j = i + 1;
-    // Absorb at most ONE wrapped continuation line, and only when it actually
-    // reads as a continuation (#184). A wrapped grid cell almost never spills
-    // past one line; the single-line cap plus the opt-in `isCourseworkContinuation`
-    // guard stop the loop from swallowing an acronym school or trailing prose
-    // (`GPA: 3.8`) from the next entry into the prior course.
-    //
-    // `isCourseworkContinuation` alone missed a Title-case, hint-less, non-
-    // acronym school ("Georgia Tech") immediately after a coursework bullet —
-    // its guards reject only DEGREE_RE/INSTITUTION_HINTS/date-only lines and an
-    // all-caps acronym token, none of which "Georgia Tech" trips, so it read as
-    // a wrapped continuation and swallowed the next entry's institution whole
-    // (#882 review). `isInstitutionLeadAt` is the segmenter's own predicate for
-    // exactly this shape (a dated header followed by a degree line); decline the
-    // absorb whenever the candidate line satisfies it, regardless of what
-    // `isCourseworkContinuation` says.
-    if (
-      j < ls.length &&
-      !isBulletLine(ls[j]) &&
-      isCourseworkContinuation(ls[j].text) &&
-      !isInstitutionLeadAt(ls, j)
-    ) {
-      item += ` ${ls[j].text.trim()}`;
-      span.push(j);
-      j++;
-    }
-    item = item.trim();
-    // Peel a leading source-side label ("Coursework:", "Relevant Coursework:",
-    // "Incoming Courses:", "Selected Courses:", "Courses:") so the residue is
-    // the course list itself and the reconstructed résumé doesn't render a
-    // redundant "Coursework: Relevant Coursework: …" double-label (#367).
-    item = item.replace(COURSEWORK_LABEL_RE, "").trim();
-    // Peel a trailing attendance-date range that rode at the END of the
-    // coursework line ("… Data Mining. Aug 2023 – May 2025", #555) so the date
-    // is not surfaced as a phantom last course, and remember it to attribute to
-    // this entry below (the coursework line is `consumed`, so it never reaches
-    // the chunk's own date parse).
-    const tailDate = trailingAttendanceDate(item);
-    item = item.replace(TRAILING_ATTENDANCE_DATE_RE, "").trim();
-    // Split a comma-separated course list into individual entries so each
-    // course is addressable in the reconstructed view (#367). A single-course
-    // bullet with no comma remains one entry. The Title-case guard runs on
-    // the FIRST item only (matching pre-split whole-bullet semantics): a
-    // lowercase prose bullet ("- including courses taught in Japanese") is
-    // dropped as before, but a mid-list lowercase course
-    // ("Coursework: Data Structures, algorithms, Operating Systems") is kept
-    // alongside its Title-case siblings rather than silently dropped.
-    const items = item.includes(",")
-      ? item.split(/\s*,\s*/).filter((t) => t.length > 0)
-      : [item];
-    if (items.length > 0 && /^[A-Z0-9]/.test(items[0])) {
-      for (const c of items) coursework.push({ text: c, idx: i });
-      if (tailDate) courseworkDates.push({ date: tailDate, idx: i });
+    const { item, span, next } = absorbCourseworkContinuation(
+      ls,
+      i,
+      stripBullet(ls[i].text),
+    );
+    const split = splitCourseworkItem(item);
+    if (split) {
+      for (const c of split.items) coursework.push({ text: c, idx: i });
+      if (split.tailDate) courseworkDates.push({ date: split.tailDate, idx: i });
       for (const k of span) consumed.add(k);
     }
-    i = j - 1;
+    i = next - 1;
   }
+  return { coursework, courseworkDates, consumed };
+}
 
-  // Keep the source-line index on each entry line so a block's start position
-  // is known — that anchor is what coursework is attributed against. Tracked
-  // in `origIdxOf` (not a field on the line itself) because the wrap-join pass
-  // below mints synthetic merged `PdfLine`s that `parseEntryBlocks` then
-  // filters/reindexes internally (#914).
+/**
+ * Build the entry-detection line array for `parseEntryBlocks`: drop bullets,
+ * consumed coursework lines, and blank lines, then re-join a degree subject
+ * that wrapped across two visual lines — the degree-subject wrap-join
+ * (#914). A degree line ending in a dangling connective ("… Computer Science
+ * &", "… Electrical and") continues on the next line — PDFs wrap a long field
+ * this way. Merge the single following continuation back so the field is not
+ * truncated at the wrap point and the orphan tail ("Engineering") is not
+ * mistaken for an institution. Only a degree line with a dangling connective
+ * absorbs, and only a continuation that is not itself a new entry lead
+ * (degree / institution-hint / bare date).
+ *
+ * Returns both the line array AND `origIdxOf`, the map from each (possibly
+ * synthetic, merged) line back to its *source* line index — needed because
+ * the merge above mints synthetic `PdfLine`s that carry no index of their
+ * own, and `parseEntryBlocks` filters/reindexes internally, so a block's
+ * anchor line can only be traced back to its source position through this
+ * map.
+ */
+function joinWrappedEducationDegreeLines(
+  ls: PdfLine[],
+  consumed: Set<number>,
+): { entryLines: PdfLine[]; origIdxOf: WeakMap<PdfLine, number> } {
   const origIdxOf = new WeakMap<PdfLine, number>();
   const rawEntryLines: PdfLine[] = [];
   for (let idx = 0; idx < ls.length; idx++) {
@@ -1770,13 +1919,6 @@ export function extractEducation(
     origIdxOf.set(l, idx);
     rawEntryLines.push(l);
   }
-  // Re-join a degree subject that wrapped across two visual lines. A degree line
-  // ending in a dangling connective ("… Computer Science &", "… Electrical and")
-  // continues on the next line — PDFs wrap a long field this way. Merge the single
-  // following continuation back so the field is not truncated at the wrap point
-  // and the orphan tail ("Engineering") is not mistaken for an institution. Only a
-  // degree line with a dangling connective absorbs, and only a continuation that is
-  // not itself a new entry lead (degree / institution-hint / bare date).
   const entryLines: PdfLine[] = [];
   for (let i = 0; i < rawEntryLines.length; i++) {
     const cur = rawEntryLines[i];
@@ -1801,6 +1943,69 @@ export function extractEducation(
       entryLines.push(cur);
     }
   }
+  return { entryLines, origIdxOf };
+}
+
+/**
+ * Index into `built` of the entry a line at `idx` belongs to — the nearest
+ * *preceding* entry by line position, the per-item lookup `built` with
+ * `attributeCourseworkToEntries` shares between coursework items and
+ * tail-dates. `built` is in document order, so its `startIdx` values are
+ * monotonic and the scan can stop at the first entry past `idx`. A block
+ * that appears before any degree (or a single-entry section) falls to the
+ * first entry — the original #164 behavior.
+ */
+function entryIndexForLine(built: { startIdx: number }[], idx: number): number {
+  let target = 0;
+  for (let e = 0; e < built.length; e++) {
+    if (built[e].startIdx <= idx) target = e;
+    else break;
+  }
+  return target;
+}
+
+/**
+ * Attribute each recovered coursework item (#190) and tail-date (#555) to its
+ * nearest *preceding* entry by line position — the coursework attribution
+ * pass (#914): a course listed under the Master's stays with the Master's,
+ * one under the Bachelor's with the Bachelor's. A coursework-line tail date
+ * is attached only when the target entry parsed NO date of its own — a real
+ * date on the degree/institution line always wins over a coursework-tail
+ * date. Mutates `value`'s entries in place.
+ */
+function attributeCourseworkToEntries(
+  value: ResumeEducation[],
+  built: { startIdx: number }[],
+  coursework: { text: string; idx: number }[],
+  courseworkDates: { date: string; idx: number }[],
+): void {
+  for (const course of coursework) {
+    const target = entryIndexForLine(built, course.idx);
+    (value[target].coursework ??= []).push(course.text);
+  }
+
+  for (const cd of courseworkDates) {
+    const entry = value[entryIndexForLine(built, cd.idx)];
+    if (!entry.start_date && !entry.end_date && !entry.year) {
+      Object.assign(entry, educationDateFields(parseEducationDates(cd.date)));
+    }
+  }
+}
+
+export function extractEducation(
+  education: PdfSection | undefined,
+): { value: ResumeEducation[]; confidence: number } {
+  if (!education || education.lines.length === 0)
+    return { value: [], confidence: 0 };
+
+  const ls = education.lines;
+  const { coursework, courseworkDates, consumed } =
+    collectEducationCoursework(ls);
+
+  const { entryLines, origIdxOf } = joinWrappedEducationDegreeLines(
+    ls,
+    consumed,
+  );
   if (entryLines.length === 0) return { value: [], confidence: 0 };
 
   // Segment into entry blocks via the shared `parseEntryBlocks` primitive
@@ -1866,35 +2071,7 @@ export function extractEducation(
   if (built.length === 0) return { value: [], confidence: 0 };
 
   const value = built.map((b) => b.entry);
-  // Attribute each coursework item to the nearest *preceding* entry by line
-  // position (#190): a course listed under the Master's stays with the Master's,
-  // one under the Bachelor's with the Bachelor's. A block that appears before
-  // any degree (or a single-entry section) falls to the first entry — the
-  // original #164 behavior. `built` is in document order, so its `startIdx`
-  // values are monotonic and the scan can stop at the first entry past `idx`.
-  for (const course of coursework) {
-    let target = 0;
-    for (let e = 0; e < built.length; e++) {
-      if (built[e].startIdx <= course.idx) target = e;
-      else break;
-    }
-    (value[target].coursework ??= []).push(course.text);
-  }
-
-  // Attribute a date recovered from a coursework-line tail (#555) to the nearest
-  // preceding entry, but only when that entry parsed NO date of its own — a real
-  // date on the degree/institution line always wins over a coursework-tail date.
-  for (const cd of courseworkDates) {
-    let target = 0;
-    for (let e = 0; e < built.length; e++) {
-      if (built[e].startIdx <= cd.idx) target = e;
-      else break;
-    }
-    const entry = value[target];
-    if (!entry.start_date && !entry.end_date && !entry.year) {
-      Object.assign(entry, educationDateFields(parseEducationDates(cd.date)));
-    }
-  }
+  attributeCourseworkToEntries(value, built, coursework, courseworkDates);
 
   // Deduplicate coursework on each entry (#223). When a standalone "Relevant
   // Coursework" section is an education alias, `findSection` merges its lines
