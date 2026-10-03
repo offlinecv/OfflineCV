@@ -56,6 +56,17 @@ type Split = {
    *  convention. Lets the no-signal default read the first segment as the TITLE
    *  (not the company), which is what that convention means (#436). */
   middot?: boolean;
+  /** True for segment 0 of a two-segment middot split that still carries an
+   *  un-split comma — the exact shape `splitRoleComma` is gated OFF of (#934).
+   *  Excludes the segment from {@link looksLikeCompany}'s scan in
+   *  `mapSegmentsToFields`: testing the WHOLE comma-joined blob for a suffix
+   *  word is wrong either way here — "Director, Group Strategy" has no
+   *  company at all ("Group" is mid-title), and "Marketing Manager, Acme
+   *  Corp" has one, but not spanning the whole string. Either reading
+   *  misclassifies the FULL segment as the company and swaps it with the
+   *  real company/location next to it, which is worse than the comma
+   *  surviving unsplit in the title. */
+  commaGatedByMiddot?: boolean;
 };
 
 // Composed via `corporate-suffix.ts` (#917) — see that module's docblock for
@@ -607,6 +618,30 @@ function stripLeadingSectionHeaders(
  * segment 0 of a two-segment line means a "Title, Team"/"Title, Company" cell
  * is only ever re-split when the rest of the line is a single trailing cell,
  * which is the shape `splitRoleComma`'s own guards were written for.
+ *
+ * That narrowing is also gated on the two-segment split NOT being a middot
+ * split (#934). The exporter's default dialect always puts a middot before
+ * the org run (`Title · Company, Location · Team`), so a comma surviving
+ * inside a middot-split segment 0 is part of the title itself, not a
+ * separator — "Kilo Engineer, Sr." and "Director, Marketing" must stay
+ * whole. A comma-tail that is genuinely an employer ("Marketing Manager,
+ * Acme Corp · Zurich") is lexically identical to those two
+ * (`<text>, <text>` before a middot) and is a known, accepted loss: an
+ * affirmative-company check on the comma-tail was tried and reverted
+ * (#934 review) because it reopened the opposite failure — a bare legal-
+ * suffix word that is actually part of a title ("Director, Group Strategy")
+ * reads as a company and gets cleaved, which is the exact bug this gate
+ * exists to prevent. The #466 empty-company dialect composes a bare
+ * `Title, Company`/`Title, Team` with no middot at all, so it never reaches
+ * this branch either way.
+ *
+ * Leaving this segment whole is not the end of the story — `mapSegmentsToFields`
+ * (below) separately tests every segment against `looksLikeCompany`, and a bare
+ * legal-suffix word inside the untouched segment ("Group" in "Director, Group
+ * Strategy") used to match it WHOLESALE, swapping the entire segment into
+ * `company` and the real company/location into `title` — worse than the
+ * accepted loss above, a straight field swap (#1130 review). `splitHeaderSegments`
+ * marks this exact segment (`commaGatedByMiddot`) so that scan excludes it.
  */
 function splitHeaderSegments(filtered: string[]): Split[] {
   const splits: Split[] = [];
@@ -625,9 +660,12 @@ function splitHeaderSegments(filtered: string[]): Split[] {
       const middot = MIDDOT_SPLIT_RE.test(h) && !/\s+[@—|]\s+/.test(h);
       atSplit.forEach((s, si) => {
         const text = s.trim();
-        // Only segment 0, and only on a two-segment line — see the docblock.
+        // Only segment 0, only on a two-segment line that is NOT a middot
+        // split (#934) — see the docblock.
         const roleComma =
-          si === 0 && atSplit.length === 2 ? splitRoleComma(text) : null;
+          si === 0 && atSplit.length === 2 && !middot
+            ? splitRoleComma(text)
+            : null;
         if (roleComma) {
           // `via` stays "delim": the `via: "comma"` consumers (`mapTitleFirst`
           // cases 1–3) all assume the comma cleaved the WHOLE header line into
@@ -640,7 +678,19 @@ function splitHeaderSegments(filtered: string[]): Split[] {
           );
           return;
         }
-        splits.push({ text, source: idx, via: "delim", middot });
+        // The shape `splitRoleComma` would otherwise have cleaved, had the
+        // middot gate above not disabled it (#934) — flagged so
+        // `mapSegmentsToFields` doesn't let `looksLikeCompany` scan the whole
+        // comma-joined blob and swap it with the real company/location.
+        const commaGatedByMiddot =
+          si === 0 && atSplit.length === 2 && middot && text.indexOf(",") > 0;
+        splits.push({
+          text,
+          source: idx,
+          via: "delim",
+          middot,
+          commaGatedByMiddot,
+        });
       });
       return;
     }
@@ -677,8 +727,17 @@ function mapSegmentsToFields(
   anchorIdx: number | undefined,
 ): Fields {
   // Every split that reads like a company/institution (its index in `splits`).
+  // A `commaGatedByMiddot` segment is excluded: it is a comma-joined blob
+  // `splitRoleComma` would have cleaved if the middot gate hadn't disabled it
+  // (#934), and testing the WHOLE blob for a suffix word misclassifies it as
+  // the company either way — whether the suffix is mid-title ("Director,
+  // Group Strategy") or a real, un-isolated employer tail ("Marketing
+  // Manager, Acme Corp") — swapping it with the real company/location next to
+  // it (#1130 review).
   const companyMatchIdxs = splits
-    .map((s, i) => (looksLikeCompany(s.text) ? i : -1))
+    .map((s, i) =>
+      !s.commaGatedByMiddot && looksLikeCompany(s.text) ? i : -1,
+    )
     .filter((i) => i >= 0);
   // The stacked-header positional tiebreak is available only when the anchor
   // (date) line is known AND at least one split sits ABOVE it (a title line) —

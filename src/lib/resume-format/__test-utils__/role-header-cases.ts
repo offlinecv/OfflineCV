@@ -101,6 +101,27 @@ export const INVERTIBLE_CASES: readonly RoleHeaderCase[] = [
       location: "Paris",
     },
   },
+  {
+    // Was PRODUCTION_DIVERGENT_CASES until #934: `splitRoleComma` no longer
+    // cleaves segment 0 of a middot-split header, so a comma inside the title
+    // itself survives — a very common real shape ("Director, Marketing").
+    marker: "Kilo",
+    name: "title containing a comma, default dialect",
+    fields: { title: "Kilo Engineer, Sr.", company: "Globex" },
+  },
+  {
+    // #1130 review: the "Kilo" row above has no company-suffix word in its
+    // comma tail, so it never exercised `mapSegmentsToFields`'s separate
+    // `looksLikeCompany` scan of the un-split segment 0. A title whose tail
+    // DOES carry one ("Group" is in `COMPANY_SUFFIX_RE`) classified the WHOLE
+    // segment as the company and swapped it with the real company next to it
+    // — worse than the Kilo row's accepted comma-survives-in-the-title
+    // behavior, a straight field swap. Fixed by excluding this shape from
+    // that scan; this row pins that production now agrees with the spec.
+    marker: "November",
+    name: "title containing a comma AND a bare legal-entity word, default dialect",
+    fields: { title: "November Director, Group Strategy", company: "Globex" },
+  },
 ];
 
 /**
@@ -131,15 +152,6 @@ export const PRODUCTION_DIVERGENT_CASES: readonly (RoleHeaderCase & {
       company: "Wingtip Financial",
       team: "Payments",
     },
-  },
-  {
-    marker: "Kilo",
-    name: "title containing a comma, default dialect",
-    // The serious one, and a very common real shape ("Director, Marketing").
-    // `splitRoleComma` cleaves segment 0 at the comma, so the title's tail
-    // becomes the company and the real company slides into `team`.
-    fields: { title: "Kilo Engineer, Sr.", company: "Globex" },
-    production: { title: "Kilo Engineer", company: "Sr.", team: "Globex" },
   },
   {
     marker: "Lima",

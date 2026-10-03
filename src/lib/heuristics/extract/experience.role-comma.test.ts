@@ -217,3 +217,67 @@ describe("a delimiter header whose leading cell hides a 'Title, Company' comma (
     expect(roles[0].team ?? "").not.toMatch(/Northwind/);
   });
 });
+
+describe("a middot header whose segment 0 hides a 'Title, Company' comma (#934 review)", () => {
+  it("leaves a comma INSIDE the title alone, even when the comma-tail reads as a company", () => {
+    // #934 gates `splitRoleComma` off ANY middot-split segment 0: a
+    // comma-tail affirmative-company check was tried and reverted, because
+    // it cannot tell a genuine "Title, Company" cell ("Marketing Manager,
+    // Acme Corp · Zurich") from a title whose own tail merely contains a
+    // bare legal-entity word ("Director, Group Strategy · Globex" — "Group"
+    // matches the company-suffix vocabulary but is title text). Treating the
+    // latter as a company reopens the exact cleave-the-title bug #934 fixed,
+    // so the comma-tail employer case stays an accepted, documented loss.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Kilo Engineer, Sr. · Globex", fontSize: 11 },
+      { text: "March 2021 - Present", fontSize: 11 },
+      { text: "• Led the platform rollout.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Kilo Engineer, Sr.");
+    expect(roles[0].company).toBe("Globex");
+  });
+
+  it("does not let the bare legal-entity word in the title promote the WHOLE segment to company (#1130 review)", () => {
+    // `splitRoleComma` staying off this shape (above) is not the whole story:
+    // `mapSegmentsToFields` separately tested the un-split segment 0 against
+    // `looksLikeCompany`, and "Director, Group Strategy" matched WHOLESALE —
+    // "Group" is in `COMPANY_SUFFIX_RE` — so the entire comma-bearing segment
+    // got classified as the company and swapped with the real company next to
+    // it: {title: "Globex", company: "Director, Group Strategy"}. That is
+    // worse than the accepted comma-survives-the-title loss above — a field
+    // swap, not a pass-through. Fixed by excluding this exact shape (segment 0
+    // of a two-segment middot split that still carries a comma) from the
+    // `looksLikeCompany` scan entirely.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Director, Group Strategy · Globex", fontSize: 11 },
+      { text: "March 2021 - Present", fontSize: 11 },
+      { text: "• Set the group's strategy.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Director, Group Strategy");
+    expect(roles[0].company).toBe("Globex");
+  });
+
+  it("does not swap a genuine comma-tail employer into the title slot either (#1130 review)", () => {
+    // The mirror shape: the comma-tail IS a real employer ("Acme Corp"), not
+    // title text. Before the fix this was the SAME field swap in the other
+    // direction — the whole "Marketing Manager, Acme Corp" blob matched
+    // `looksLikeCompany` (via "Corp"), so it became `company` and the trailing
+    // location segment ("Zurich") became `title`. The comma-tail/location
+    // split is still lost (the documented #934 tradeoff — company ends up
+    // "Zurich", not "Acme Corp"), but the title is no longer corrupted into a
+    // bare city name.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Marketing Manager, Acme Corp · Zurich", fontSize: 11 },
+      { text: "March 2021 - Present", fontSize: 11 },
+      { text: "• Owned the demand-gen funnel.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Marketing Manager, Acme Corp");
+    expect(roles[0].company).not.toBe("Marketing Manager, Acme Corp");
+  });
+});
