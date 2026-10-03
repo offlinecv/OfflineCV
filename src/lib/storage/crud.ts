@@ -182,6 +182,56 @@ export async function getRecord<T extends StoredRecord>(
 }
 
 /**
+ * Read a record and write it back inside ONE IndexedDB transaction (#763).
+ *
+ * Every write above this — `putRecord`, `softDeleteRecord` — reads through one
+ * `idb` shorthand call and writes through another, and each shorthand call
+ * opens its own transaction. A caller with a decision to make in between (read
+ * a row, check something about it, write it back) has a gap for another
+ * writer to land in unseen; `archiveJobs` (`jobs.ts`) is the case that carried
+ * that gap in its own docblock rather than papering over it, and this
+ * function is what closes it: the `get` and the `put` share one transaction,
+ * so nothing else touching this store can be interleaved between them.
+ *
+ * `mutate` receives the CURRENT row — `undefined` if there isn't one — and
+ * returns the row to write, or `undefined` to leave the store untouched.
+ * `undefined` means "don't", the same convention `ArchiveJobsOptions.stillEligible`
+ * already uses: nothing is written and no change signal fires on that branch,
+ * matching "a read posts none" everywhere else in this file.
+ *
+ * `mutate` MUST be synchronous, and the type — not just this comment — is what
+ * enforces it: an `await` inside it would suspend past the current microtask
+ * with the transaction still open, and IndexedDB auto-commits a transaction
+ * the instant control returns to the event loop with no request pending on
+ * it. An async mutator would make the transaction close out from under it,
+ * silently reopening the exact gap this function exists to close — and doing
+ * so invisibly, unlike the two-call shape it replaces. A synchronous decision
+ * — a status check, an eligibility predicate — is the whole use case; anything
+ * that needs an `await` belongs before the call, not inside it.
+ *
+ * `updatedAt` is stamped here the same way `putRecord` stamps it, so a caller
+ * doesn't have to reach for `monotonicNow` itself to get that guarantee.
+ */
+export async function updateRecord<T extends StoredRecord>(
+  store: StoreName,
+  id: string,
+  mutate: (current: T | undefined) => T | undefined,
+): Promise<T | undefined> {
+  const db = await looseDB();
+  const tx = db.transaction(store, "readwrite");
+  const existing = (await tx.store.get(id)) as T | undefined;
+  const next = mutate(existing);
+  let written: T | undefined;
+  if (next !== undefined) {
+    written = { ...next, updatedAt: monotonicNow() } as T;
+    await tx.store.put(written);
+  }
+  await tx.done;
+  if (written !== undefined) emitChange(store);
+  return written;
+}
+
+/**
  * Every record in a store — **excluding tombstones by default** (#730).
  *
  * The default is the safe direction, and it is chosen rather than inherited: a

@@ -32,6 +32,7 @@ import {
   clearStore,
   softDeleteRecord,
   runBatchedWrites,
+  updateRecord,
 } from "./crud.ts";
 import { getAllRecords, getRecord } from "./crud.ts";
 import { saveJob, archiveJobs } from "./jobs.ts";
@@ -154,6 +155,35 @@ describe("crud.ts: writes post one change signal each, reads post none (#760)", 
     const listener = listenForChanges();
     try {
       await getAllRecords<JobRecord>("jobs");
+      await settleWithoutDelivery();
+      expect(listener.received).toEqual([]);
+    } finally {
+      listener.close();
+    }
+  });
+
+  it("updateRecord posts one message when the mutator actually writes (#763)", async () => {
+    await putRecord<JobRecord>("jobs", { id: "job-1", title: "SWE", company: "Acme", status: "interested" });
+    const listener = listenForChanges();
+    try {
+      const updated = await updateRecord<JobRecord>("jobs", "job-1", (existing) =>
+        existing === undefined ? undefined : { ...existing, status: "applied" },
+      );
+      expect(updated?.status).toBe("applied");
+      await waitForDelivery(() =>
+        expect(listener.received).toEqual([{ store: "jobs" }]),
+      );
+    } finally {
+      listener.close();
+    }
+  });
+
+  it("updateRecord posts nothing when the mutator declines to write", async () => {
+    await putRecord<JobRecord>("jobs", { id: "job-1", title: "SWE", company: "Acme", status: "interested" });
+    const listener = listenForChanges();
+    try {
+      const updated = await updateRecord<JobRecord>("jobs", "job-1", () => undefined);
+      expect(updated).toBeUndefined();
       await settleWithoutDelivery();
       expect(listener.received).toEqual([]);
     } finally {
