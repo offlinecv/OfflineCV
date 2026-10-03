@@ -1030,15 +1030,16 @@ function pushAddedEntry(
       company: entry.subtitle ?? "",
       ...(entry.location ? { location: entry.location } : {}),
       ...(entry.team ? { team: entry.team } : {}),
-      // Through the same #672 rule the edit path uses: "+ Add role" with only an
-      // end date filled in reaches the identical unrepresentable shape, and a
-      // second convention here would mean an added role and an edited one export
-      // differently. Education is deliberately NOT normalised — a lone education
-      // date is a GRADUATION date and belongs in `end_date` (#97, pinned by
-      // #618).
+      // Through the same #672/#686 rule the edit path uses: "+ Add role" with
+      // only an end date filled in reaches the identical unrepresentable
+      // shape, and a second convention here would mean an added role and an
+      // edited one export differently. Education is deliberately NOT
+      // normalised — a lone education date is a GRADUATION date and belongs
+      // in `end_date` (#97, pinned by #618).
       ...normalizeExperienceDates({
         start_date: entry.start_date,
         end_date: entry.end_date,
+        is_current: entry.is_current,
       }),
       description,
     });

@@ -67,11 +67,12 @@ interface RoleEntryProps {
   experienceIndex: number | null;
   /** Editable overrides for this role's header fields (from useEditableParse). */
   overrides?: ExperienceFieldOverrides;
-  /** Called when the user commits a field edit. `is_current` is excluded by
-   *  type — see `RoleHeaderProps`. */
-  onFieldChange?: (
-    field: Exclude<keyof ExperienceFieldOverrides, "is_current">,
-    value: string,
+  /** Called when the user commits a field edit. `value` is `boolean` only
+   *  for `is_current` (#686) — see `RoleHeaderProps`, whose `RoleFieldChange`
+   *  this mirrors so the field/value pair stays correlated end to end. */
+  onFieldChange?: <K extends keyof ExperienceFieldOverrides>(
+    field: K,
+    value: Required<ExperienceFieldOverrides>[K],
   ) => void;
   /** Commit a bullet edit, keyed by BulletObservation.id (#82, #648). The
    *  optional third argument identifies the added-bullets bucket + line, which

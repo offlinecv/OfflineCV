@@ -30,6 +30,11 @@ export interface RoleDisplay {
   startDate: string | undefined;
   /** "Present" for an ongoing role, whatever the stored end date says. */
   endDate: string | undefined;
+  /** Whether the role is ongoing (#686) — the resolved flag `endDate` above
+   *  already reads through; exposed separately so the "Current role"
+   *  checkbox (`RoleCurrentToggle`) has a plain boolean to render, rather
+   *  than re-deriving it from a formatted string. */
+  isCurrent: boolean;
 }
 
 /**
@@ -43,7 +48,7 @@ export function resolveRoleDisplay(
   overrides: ExperienceFieldOverrides | undefined,
 ): RoleDisplay {
   const ov = overrides ?? {};
-  const isCurrent = ov.is_current ?? exp.is_current;
+  const isCurrent = ov.is_current ?? exp.is_current ?? false;
   return {
     title: resolve(exp.title, ov.title),
     company: resolve(exp.company, ov.company),
@@ -51,6 +56,7 @@ export function resolveRoleDisplay(
     team: resolve(exp.team, ov.team),
     startDate: resolve(exp.start_date, ov.start_date),
     endDate: isCurrent ? "Present" : resolve(exp.end_date, ov.end_date),
+    isCurrent,
   };
 }
 

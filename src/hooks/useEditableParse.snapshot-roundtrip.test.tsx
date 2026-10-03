@@ -72,8 +72,10 @@ describe("EditSnapshot — every channel survives snapshot → replay (#768)", (
     act(() => {
       // contactOverrides
       s.setContactField("full_name", "Jane Q. Doe");
-      // experienceOverrides
+      // experienceOverrides — including `is_current` (#686), the newest key
+      // in this map and exactly the shape #425/#455 were lost as.
       s.setExperienceField(0, "title", "Staff Engineer");
+      s.setExperienceField(0, "is_current", true);
       // bulletOverrides — a plausible id shape ("<occurrence>|<normalized text>").
       s.setBulletField("0|shipped a thing", "Shipped a rewritten thing.");
       // descriptionOverrides
@@ -95,6 +97,10 @@ describe("EditSnapshot — every channel survives snapshot → replay (#768)", (
       addedRoleId = s.addEntry("experience");
       s.setEntryField(addedRoleId, "title", "Contract Engineer");
       s.setEntryField(addedRoleId, "team", "Platform Infrastructure");
+      s.setEntryField(addedRoleId, "start_date", "2023");
+      // `is_current` (#686) on an ADDED entry too — its own field, separate
+      // from the override-map key above.
+      s.setEntryField(addedRoleId, "is_current", true);
       s.addBullet(addedRoleId, "Shipped an integration.");
       // achievements' own added-entry fields (achievementType), on a SEPARATE
       // added entry — `team` and `achievementType` are the two fields #425 /
@@ -143,6 +149,7 @@ describe("EditSnapshot — every channel survives snapshot → replay (#768)", (
 
     expect(t.contactOverrides.full_name).toBe("Jane Q. Doe");
     expect(t.experienceOverrides[0]?.title).toBe("Staff Engineer");
+    expect(t.experienceOverrides[0]?.is_current).toBe(true);
     expect(t.bulletOverrides["0|shipped a thing"]).toBe(
       "Shipped a rewritten thing.",
     );
@@ -160,6 +167,8 @@ describe("EditSnapshot — every channel survives snapshot → replay (#768)", (
     expect(restoredRole?.title).toBe("Contract Engineer");
     // `team` — the #425 field.
     expect(restoredRole?.team).toBe("Platform Infrastructure");
+    // `is_current` — the #686 field, on the ADDED-entry side.
+    expect(restoredRole?.is_current).toBe(true);
     const restoredAch = t.addedEntries.find((e) => e.section === "achievements");
     // `achievementType` — the #455 field.
     expect(restoredAch?.achievementType).toBe("Patent");

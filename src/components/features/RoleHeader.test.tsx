@@ -57,3 +57,63 @@ describe("RoleHeader actions (#913 follow-up)", () => {
     expect(html).toContain("Staff Engineer");
   });
 });
+
+describe("RoleHeader — 'Current role' checkbox (#686)", () => {
+  it("is disabled when the role has no start date to anchor 'ongoing'", () => {
+    const undated = {
+      experienceIndex: 0,
+      experience: { title: "Staff Engineer", company: "Acme" },
+      bullets: [],
+    } as unknown as BulletGroup;
+    const html = renderToStaticMarkup(
+      createElement(RoleHeader, {
+        group: undated,
+        onFieldChange: () => {},
+        actions: ACTIONS,
+      }),
+    );
+    const checkboxAt = html.indexOf('type="checkbox"');
+    expect(checkboxAt).toBeGreaterThan(-1);
+    // The nearest preceding/following attributes on the same input tag.
+    const tagEnd = html.indexOf(">", checkboxAt);
+    expect(html.slice(checkboxAt, tagEnd)).toContain("disabled");
+  });
+
+  it("is enabled once the role has a start date", () => {
+    const html = renderToStaticMarkup(
+      createElement(RoleHeader, {
+        group: GROUP,
+        onFieldChange: () => {},
+        actions: ACTIONS,
+      }),
+    );
+    const checkboxAt = html.indexOf('type="checkbox"');
+    const tagEnd = html.indexOf(">", checkboxAt);
+    expect(html.slice(checkboxAt, tagEnd)).not.toContain("disabled");
+  });
+
+  it("reflects a parsed-ongoing role as checked, with no editable End cell", () => {
+    const ongoing = {
+      experienceIndex: 0,
+      experience: {
+        title: "Staff Engineer",
+        company: "Acme",
+        start_date: "2021",
+        is_current: true,
+      },
+      bullets: [],
+    } as unknown as BulletGroup;
+    const html = renderToStaticMarkup(
+      createElement(RoleHeader, {
+        group: ongoing,
+        onFieldChange: () => {},
+        actions: ACTIONS,
+      }),
+    );
+    const checkboxAt = html.indexOf('type="checkbox"');
+    const tagEnd = html.indexOf(">", checkboxAt);
+    expect(html.slice(checkboxAt, tagEnd)).toContain("checked");
+    expect(html).toContain("Present");
+    expect(html).not.toContain('placeholder="end date"');
+  });
+});

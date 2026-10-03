@@ -139,16 +139,14 @@ function NotDetected({ what }: { what: string }) {
 // ── Sections ──────────────────────────────────────────────────────────────────
 
 /** Map a RoleHeader field name to the flat AddedEntry field it edits. */
-const EXPERIENCE_FIELD_MAP: Record<
-  Exclude<keyof ExperienceFieldOverrides, "is_current">,
-  AddedEntryField
-> = {
+const EXPERIENCE_FIELD_MAP: Record<keyof ExperienceFieldOverrides, AddedEntryField> = {
   title: "title",
   company: "subtitle",
   location: "location",
   team: "team",
   start_date: "start_date",
   end_date: "end_date",
+  is_current: "is_current",
 };
 
 // Exported for `ExperienceSection.test.tsx` only — the lifted "Other bullets"
@@ -208,7 +206,7 @@ export function ExperienceSection({
   onExperienceFieldChange: (
     index: number,
     field: keyof ExperienceFieldOverrides,
-    value: string,
+    value: string | boolean,
   ) => void;
   /** Commit a bullet edit by BulletObservation.id, plus the optional
    *  added-bullets bucket + line that is the only way to reach a USER-ADDED
@@ -235,7 +233,13 @@ export function ExperienceSection({
   parsedIndices: readonly number[];
   onAddEntry: () => void;
   onRemoveEntry: (key: string) => void;
-  onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  /** `value` is `boolean` only for `is_current` (#686); every other field is
+   *  a plain string. */
+  onEntryField: (
+    id: string,
+    field: AddedEntryField,
+    value: string | boolean,
+  ) => void;
   onAddBullet: (entryKey: string, text: string) => void;
   /** Snapshot the slots a rewrite batch will write, for a one-action undo of
    *  the whole batch (issue 510). */

@@ -26,6 +26,7 @@ describe("resolveRoleDisplay", () => {
       team: "Payments",
       startDate: "2019",
       endDate: "2022",
+      isCurrent: false,
     });
   });
 
@@ -49,6 +50,18 @@ describe("resolveRoleDisplay", () => {
     expect(
       resolveRoleDisplay({ ...exp, is_current: true }, { is_current: false }).endDate,
     ).toBe("2022");
+  });
+
+  it("exposes isCurrent as a plain boolean, never undefined (#686)", () => {
+    expect(resolveRoleDisplay(exp, undefined).isCurrent).toBe(false);
+    expect(resolveRoleDisplay({ ...exp, is_current: true }, undefined).isCurrent).toBe(
+      true,
+    );
+    expect(resolveRoleDisplay(exp, { is_current: true }).isCurrent).toBe(true);
+    expect(
+      resolveRoleDisplay({ ...exp, is_current: true }, { is_current: false })
+        .isCurrent,
+    ).toBe(false);
   });
 });
 
