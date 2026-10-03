@@ -39,9 +39,88 @@ export const COMPANY_SUFFIX_RE =
  * heuristic the default fallback misattributes a `**Sr. Engineering
  * Manager (L7)**` header as the company and `**Globex / CloudWave**`
  * as the title.
+ *
+ * Exported as a literal array (#918), not just the compiled regex, so a test
+ * can assert this list is a SUBSET of the richer inventory in the sibling
+ * leaf `title-surface-forms.ts` — the two must stay joinable without either
+ * file importing the other. `Co-founder` / `Cofounder` are listed as two
+ * literal forms rather than the regex fragment `Co-?founder` for exactly that
+ * reason: a literal-string subset check can't see into a fragment.
  */
-const TITLE_KEYWORDS_RE =
-  /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps|Assistant|Intern|Internship|Trainee|Apprentice|Coordinator|Facilitator|Technician|Representative|Supervisor|Strategist|Advisor|Adviser|Counselor|Recruiter|Accountant|Auditor|Editor|Writer|Producer|Teacher|Instructor|Lecturer|Professor|Tutor|Agent|Clerk|Ambassador|Volunteer|Fellow)\b/i;
+export const TITLE_KEYWORDS = [
+  "Engineer",
+  "Engineering",
+  "Developer",
+  "Manager",
+  "Director",
+  "Lead",
+  "Consultant",
+  "Analyst",
+  "Specialist",
+  "Associate",
+  "Architect",
+  "Principal",
+  "Officer",
+  "Designer",
+  "Scientist",
+  "Researcher",
+  "Administrator",
+  "Founder",
+  "Co-founder",
+  "Cofounder",
+  "President",
+  "VP",
+  "Vice President",
+  "Head",
+  "Chief",
+  "CTO",
+  "CEO",
+  "COO",
+  "CFO",
+  "CIO",
+  "PM",
+  "TPM",
+  "SRE",
+  "DevOps",
+  "Assistant",
+  "Intern",
+  "Internship",
+  "Trainee",
+  "Apprentice",
+  "Coordinator",
+  "Facilitator",
+  "Technician",
+  "Representative",
+  "Supervisor",
+  "Strategist",
+  "Advisor",
+  "Adviser",
+  "Counselor",
+  "Recruiter",
+  "Accountant",
+  "Auditor",
+  "Editor",
+  "Writer",
+  "Producer",
+  "Teacher",
+  "Instructor",
+  "Lecturer",
+  "Professor",
+  "Tutor",
+  "Agent",
+  "Clerk",
+  "Ambassador",
+  "Volunteer",
+  "Fellow",
+] as const;
+
+/** Escapes a literal string for safe interpolation into a regex alternation
+ *  (#918 review) — every `TITLE_KEYWORDS` entry is a plain word today, but a
+ *  future entry containing a regex metacharacter ("C++ Developer", "Head
+ *  (Interim)") would otherwise pass tsc/lint and throw at module evaluation. */
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const TITLE_KEYWORDS_RE = new RegExp(`\\b(${TITLE_KEYWORDS.map(escapeRe).join("|")})\\b`, "i");
 
 /** No word characters after a `COMPANY_SUFFIX_RE` match — i.e. the suffix is
  *  the string's last token, optionally trailing punctuation/whitespace

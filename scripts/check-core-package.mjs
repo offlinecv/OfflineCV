@@ -222,7 +222,7 @@ const EXPECTED_EXPORTS = {
  * the assertion silently covering two of three surfaces.
  */
 const ENTRY_CLOSURES = {
-  ".": { modules: 29, networkBearingModules: 0 },
+  ".": { modules: 30, networkBearingModules: 0 },
   "./job-search": { modules: 11, networkBearingModules: 7 },
 };
 
@@ -233,7 +233,7 @@ const ENTRY_CLOSURES = {
  * same reason `importSpecifiers` does — and here the difference is not
  * theoretical but load-bearing on the very first run. `tsc` preserves docblocks
  * into the emit verbatim, and the emitted `.` entry contains the sentence "the
- * value-edge closure of the specifiers below is 29 modules and reaches no
+ * value-edge closure of the specifiers below is 30 modules and reaches no
  * `fetch`/`WebSocket`/…" — so the obvious `/\b(fetch|…)\s*\(/` sweep reports
  * FOUR network primitives in the one file whose whole claim is that it has
  * none. A comment is not a node; the parse simply does not see it.
@@ -274,7 +274,7 @@ const THIRD_ENTRY_CHECKLIST = [
  * shipped, are unreachable from either entry, and dynamic-import packages this
  * one does not depend on; what stops a consumer loading them anyway is `exports`
  * declaring two subpaths and no wildcard. Verified rather than asserted, because
- * a single `"./*"` entry added for convenience would silently publish all 66
+ * a single `"./*"` entry added for convenience would silently publish all 67
  * emitted modules.
  *
  * The three are deliberately different shapes, and only the first two name a

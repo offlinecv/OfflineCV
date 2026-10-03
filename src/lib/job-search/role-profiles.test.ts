@@ -16,6 +16,7 @@ import {
   resolveProfilesByTitles,
   resolveProfilesBySkills,
   roleProfileById,
+  titleHasKnownSurfaceForm,
   type RoleProfile,
 } from "./role-profiles.ts";
 import {
@@ -104,6 +105,26 @@ describe("ROLE_PROFILES table integrity", () => {
       expect(profile.titles.length).toBeGreaterThan(0);
       expect(profile.skills.length).toBeGreaterThan(0);
       expect(profile.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  // #918: every title this table curates must be a known surface form in the
+  // shared heuristics leaf — the "derives from" half of the join whose other
+  // half (`title-shape.ts`'s keywords ⊆ the leaf) is pinned in
+  // `title-surface-forms.test.ts`. Uses `role-profiles.ts`'s own
+  // `titleHasKnownSurfaceForm` (built from a real runtime import of the leaf)
+  // rather than re-deriving a parallel check here, so there is one definition
+  // of "known surface form", not two that could drift from each other. A
+  // title that fails here means the leaf's inventory has drifted behind this
+  // table, not that this table is wrong.
+  it("every curated title is a known surface form in the shared heuristics leaf", () => {
+    for (const profile of ROLE_PROFILES) {
+      for (const title of profile.titles) {
+        expect(
+          titleHasKnownSurfaceForm(title),
+          `${profile.id} → "${title}" matches no entry in title-surface-forms.ts`,
+        ).toBe(true);
+      }
     }
   });
 });
