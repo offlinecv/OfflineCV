@@ -23,7 +23,7 @@
       "skills",
       "summary"
     ],
-    "skillsCount": 11,
+    "skillsCount": 10,
     "experienceCount": 2,
     "educationCount": 1,
     "projectsCount": 0,
@@ -73,7 +73,7 @@
     "sectionSource": "markdown",
     "pageCount": 1,
     "rawCharCount": 1189,
-    "extractedCharCount": 1047,
+    "extractedCharCount": 1048,
     "sections": [
       {
         "name": "profile",
@@ -104,7 +104,7 @@
       "hasSummary": true,
       "experienceCount": 2,
       "educationCount": 1,
-      "skillsCount": 11
+      "skillsCount": 10
     },
     "linkAnnotationCount": 0,
     "disagreements": []
