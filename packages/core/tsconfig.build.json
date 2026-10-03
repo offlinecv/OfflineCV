@@ -24,7 +24,7 @@
     "rewriteRelativeImportExtensions": true,
 
     // Load-bearing for the privacy property the barrels' docblocks claim. The
-    // program is 66 modules: 40 are value-reachable (29 from `src/index.ts`, 11
+    // program is 67 modules: 41 are value-reachable (30 from `src/index.ts`, 11
     // from `src/job-search.ts`, and those two sets are disjoint), and the other
     // 26 are reachable from neither entry.
     //

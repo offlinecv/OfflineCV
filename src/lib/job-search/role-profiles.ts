@@ -129,6 +129,11 @@
  * `prevalence-snapshot.ts` and review the diff.
  */
 
+// The ONE job-search → heuristics runtime edge this module carries — the
+// allowed direction per #918's Decisions block, same direction
+// `query-builder.ts` already uses for `looksLikeTitle`. `title-surface-forms.ts`
+// imports nothing, so this adds no further edge beyond it.
+import { TITLE_SURFACE_FORMS } from "../heuristics/extract/title-surface-forms.ts";
 import {
   PREVALENCE_SNAPSHOT,
   type PrevalenceEntry,
@@ -1405,6 +1410,45 @@ function isSubset(needle: ReadonlySet<string>, haystack: ReadonlySet<string>): b
  */
 export function profileTitleMatches(profileTitle: string, resumeTitle: string): boolean {
   return isSubset(profileTitleTokens(profileTitle), profileTitleTokens(resumeTitle));
+}
+
+/** `TITLE_SURFACE_FORMS`, each tokenized once via `profileTitleTokens` — the
+ *  same tokenizer `ROLE_PROFILES` titles are matched with, so coverage below
+ *  is asked in the one relation this module already trusts for everything
+ *  else, not a second, looser one. Lazily built and memoised rather than a
+ *  module-level constant: nothing in production calls
+ *  `titleHasKnownSurfaceForm`, and an eager `.map` here was enough of a
+ *  module-level side effect to keep this whole leaf on the `/` entry's eager
+ *  chunk even though the predicate itself tree-shakes to nothing. */
+let surfaceFormTokenSets: readonly ReadonlySet<string>[] | undefined;
+
+function getSurfaceFormTokenSets(): readonly ReadonlySet<string>[] {
+  surfaceFormTokenSets ??= TITLE_SURFACE_FORMS.map(profileTitleTokens);
+  return surfaceFormTokenSets;
+}
+
+/**
+ * True when some entry in the shared heuristics leaf (#918,
+ * `title-surface-forms.ts`) is a token-subset of `title` — i.e. `title`
+ * genuinely contains that surface form as whole tokens, not merely a
+ * matching substring. This is how `CURATED_ROLE_PROFILES`'s titles "derive
+ * from" the leaf (#918's Decisions block): every curated title is asserted
+ * to satisfy this in `role-profiles.test.ts`, using this exported predicate
+ * rather than a second, independently-derived check — so the leaf is the
+ * one source of truth for "known title surface form" on both sides of the
+ * join, not duplicated on this side with a raw regex.
+ *
+ * Token-subset, not a raw regex match on the whole string, on purpose: a
+ * regex match passes as long as ANY known word appears anywhere in `title`,
+ * so it cannot catch a leaf entry that drifted (e.g. a typo) while some
+ * other word in the same title still matches. Tokenizing both sides and
+ * checking subset membership ties the pass/fail to the SPECIFIC surface
+ * form actually present. Total; never throws.
+ */
+export function titleHasKnownSurfaceForm(title: string): boolean {
+  const titleTokens = profileTitleTokens(title);
+  if (titleTokens.size === 0) return false;
+  return getSurfaceFormTokenSets().some((formTokens) => isSubset(formTokens, titleTokens));
 }
 
 /** Sort scored entries by score desc, then declaration order asc, then cap. */
