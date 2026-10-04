@@ -176,6 +176,22 @@ export function flattenEditedResult(
 }
 
 /**
+ * The ONE definition of "fold `edit` over `base`" — `applyOverrides` fed the
+ * `EditBase` `editBaseFromResult` builds off `base`. Exported so a caller that
+ * needs the intermediate `ApplyOverridesResult` (e.g. `resume-library.ts`'s
+ * `unresolved` list, which {@link flattenEditedResult} would discard) computes
+ * it via this one expression rather than a hand-copy that could silently
+ * diverge from {@link computeSavableResult}'s own fold.
+ */
+export function foldEdit(
+  base: CascadeResult,
+  scoreBullets: readonly BulletObservation[],
+  edit: EditSnapshot,
+): ApplyOverridesResult {
+  return applyOverrides(editBaseFromResult(base, scoreBullets), edit);
+}
+
+/**
  * The savable result of a pristine base plus a delta (#768) — the ONE
  * definition of "re-run the fold `useAnalyzedResume` performs to reproduce a
  * stored `SavedResumeSnapshot.result` from its `baseResult` + `edit`".
@@ -193,8 +209,5 @@ export function computeSavableResult(
   scoreBullets: readonly BulletObservation[],
   edit: EditSnapshot,
 ): CascadeResult {
-  return flattenEditedResult(
-    base,
-    applyOverrides(editBaseFromResult(base, scoreBullets), edit),
-  );
+  return flattenEditedResult(base, foldEdit(base, scoreBullets, edit));
 }

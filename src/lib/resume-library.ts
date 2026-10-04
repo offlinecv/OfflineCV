@@ -29,6 +29,8 @@ import {
   type AnonymousAtsScore,
 } from "./score/score.ts";
 import { scoreParsedResume } from "./score/score-cascade.ts";
+import type { UnresolvedOverride } from "./edit/apply-overrides.ts";
+import { foldEdit } from "./edit/edit-pipeline.ts";
 import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
@@ -117,6 +119,19 @@ export interface LoadedResume {
   baseResult?: CascadeResult;
   /** The delta that turns `baseResult` into `result` (#768). */
   edit?: EditSnapshot;
+  /**
+   * Every override `edit` names that no longer resolves against the CURRENT
+   * `baseResult` (#769) — a stale-delta report, not a UI signal (#770 renders
+   * it). Computed at load time with the same recipe `computeSavableResult`
+   * (`edit-pipeline.ts`) uses to reproduce the stored `result`, so the two
+   * folds cannot drift into disagreeing about what "resolves" means.
+   *
+   * Present only alongside {@link baseResult} + {@link edit} (a delta-carrying
+   * record) — absent for a flat record and for the re-parse recovery branch,
+   * neither of which replays a delta. Empty, not absent, when the base has not
+   * moved since the delta was written.
+   */
+  unresolved?: readonly UnresolvedOverride[];
 }
 
 /** Both-or-neither (#768): a lone `baseResult` has no delta to apply, and a
@@ -139,21 +154,60 @@ function hasDelta(
  *  one — ANY backup import, because a JSON round-trip turns
  *  `sections.byName`'s `Map` into `{}` (`record-contract.ts` spells out that
  *  rewrite). The `Map` check is what tells a structured-clone-intact parse from
- *  one that crossed JSON; the rest is the minimum `scoreParsedResume` and
- *  `replay` dereference. A pair that fails degrades to the flat `result` and
- *  `score`, the same record a pre-#768 build would have loaded. */
+ *  one that crossed JSON; the rest is the minimum `scoreParsedResume`, `replay`,
+ *  and `applyOverrides` dereference — `rawText` included, since a bullet-text
+ *  edit rewrites it via `withMatchedRawTextLine`'s `.split`, which throws on a
+ *  non-string rather than degrading; `accomplishmentSections` as an array,
+ *  since `scoreParsedResume` walks it with a bare `for...of`; and
+ *  `bulletOverrides` as undefined-or-object, since `applyOverrides` defaults it
+ *  with `= {}`, which only fires on `undefined` and lets a stored `null` reach
+ *  its `Object.entries` call. A pair that fails degrades to the flat `result`
+ *  and `score`, the same record a pre-#768 build would have loaded. */
 function isRestorableDelta(baseResult: unknown, edit: unknown): boolean {
   const base = baseResult as Partial<CascadeResult> | null | undefined;
   const snapshot = edit as Partial<EditSnapshot> | null | undefined;
   return (
     base?.canonical?.sections?.byName instanceof Map &&
+    Array.isArray(base.canonical.sections.accomplishmentSections) &&
     typeof base.canonical.fields === "object" &&
     base.canonical.fields !== null &&
     Array.isArray(base.triggers) &&
+    typeof base.rawText === "string" &&
     typeof snapshot === "object" &&
     snapshot !== null &&
-    Array.isArray(snapshot.removedBullets)
+    Array.isArray(snapshot.removedBullets) &&
+    (snapshot.bulletOverrides === undefined ||
+      (typeof snapshot.bulletOverrides === "object" &&
+        snapshot.bulletOverrides !== null))
   );
+}
+
+/**
+ * Fold `edit` over `base` via {@link foldEdit} — the SAME expression
+ * {@link computeSavableResult} (`edit-pipeline.ts`) folds through to reproduce
+ * a stored `result` — and report what did not resolve (#769). Calls `foldEdit`
+ * rather than `computeSavableResult` itself because that helper flattens
+ * straight to a `CascadeResult` via `flattenEditedResult`, which discards
+ * `unresolved`; this needs the intermediate `ApplyOverridesResult` for that one
+ * field. Sharing `foldEdit` (instead of a hand-copy of its expression) is what
+ * keeps this and `computeSavableResult` from silently diverging.
+ *
+ * Never throws: a `baseResult` that cannot be scored (a malformed record, a
+ * hand-built test double predating this field) reports no unresolved
+ * overrides rather than failing the whole load — the same "never throws
+ * mid-restore" contract {@link isRestorableDelta} already keeps for the pair
+ * as a whole.
+ */
+function foldUnresolvedOverrides(
+  base: CascadeResult,
+  edit: EditSnapshot,
+): readonly UnresolvedOverride[] {
+  try {
+    const scoreBullets = scoreParsedResume(base).bullets ?? [];
+    return foldEdit(base, scoreBullets, edit).unresolved;
+  } catch {
+    return [];
+  }
 }
 
 function readSnapshot(parse: unknown): SavedResumeSnapshot | null {
@@ -380,6 +434,11 @@ export async function loadResumeFromLibrary(
     };
   }
 
+  let unresolved: readonly UnresolvedOverride[] | undefined;
+  if (snap.baseResult !== undefined && snap.edit !== undefined) {
+    unresolved = foldUnresolvedOverrides(snap.baseResult, snap.edit);
+  }
+
   return {
     id: record.id,
     filename: record.filename,
@@ -390,6 +449,8 @@ export async function loadResumeFromLibrary(
     score: snap.score,
     baseResult: snap.baseResult,
     edit: snap.edit,
+    // Spread, not assign: a flat record gets no own `unresolved` key at all.
+    ...(unresolved !== undefined && { unresolved }),
   };
 }
 
