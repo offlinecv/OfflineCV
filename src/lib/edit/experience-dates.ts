@@ -24,6 +24,21 @@
  * of the flush-right slot #618 just gave lone dates. The representable set is
  * fixed; what has to change is that we stop producing values outside it.
  *
+ * THAT "FIXED" CLAIM IS SCOPED TO THE DRAWN TEXT, NOT TO EVERY EXPORT CHANNEL
+ * (#816). `renderAtsResumePdf` also attaches a JSON Resume document as
+ * `resume.json` (`pdf/render-ats-pdf.ts`), built by `toJsonResume`
+ * (`pdf/to-json-resume.ts`) from the SAME already-normalised model this module
+ * collapsed — so a lone end date reaches the attachment as `startDate`, even
+ * though `startDate`/`endDate` are independent optionals there and could have
+ * carried the un-collapsed pair. Harmless today because nothing under `src/`
+ * reads `getAttachments` back; it only becomes a real loss if #672's Notes land
+ * an attachment reader that re-parses `resume.json` instead of the drawn page.
+ * Whoever builds that reader and wants the lone-end case back has to stop
+ * collapsing on this leg specifically — moving the anchor rule from
+ * `applyOverrides`/`useEditableParse` to the text-render call sites only, so
+ * `resume.json` is built from the un-collapsed pair while the page still draws
+ * the collapsed one. Not done here: no reader exists yet to need it.
+ *
  * THE RULE, in one line: **an end date with no start date becomes the start
  * date.** Plus two corollaries — an empty string is not a value (it is a cleared
  * field, exactly as `location`/`team` already treat it), and `is_current` is a
