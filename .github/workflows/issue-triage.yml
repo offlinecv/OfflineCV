@@ -5,7 +5,11 @@
 # implement and labels it:
 #   ready-for-agent      → clear; gets a type label. If the author has write
 #                          access, `gaal` is added too, which starts
-#                          gaal-agent.yml (issue → PR).
+#                          gaal-agent.yml (issue → PR) — unless the issue
+#                          has an assignee, an open blocked-by dependency or
+#                          the `needs-human` label, read at handoff time. It
+#                          still gets `ready-for-agent`. Dependencies added
+#                          after triage runs (~1 min after filing) are not seen.
 #   needs-clarification  → a `**Triage** —` comment asks the author; their
 #                          reply (or an edit to the issue) re-runs triage.
 #   duplicate            → labelled + linked, never closed by the bot.
@@ -204,6 +208,26 @@ jobs:
           # Auto-chain to the implementing agent, only for a write-access author.
           [ "$verdict" = ready ] || exit 0
           [ "$AUTO_GAAL" = false ] && exit 0
+
+          # Opt-outs, read now rather than from the event payload. An API error
+          # fails the run rather than reading as "no assignee / no blockers".
+          issue=$(gh api "repos/$REPO/issues/$NUMBER") \
+            || { echo "::error::could not read issue #$NUMBER"; exit 1; }
+          blockers=$(gh api "repos/$REPO/issues/$NUMBER/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length') \
+            || { echo "::error::could not read #$NUMBER's dependencies"; exit 1; }
+          if [ "$(jq '.assignees | length' <<<"$issue")" -gt 0 ]; then
+            echo "Issue #$NUMBER has an assignee; leaving gaal for a maintainer to add."
+            exit 0
+          fi
+          if [ "$blockers" -gt 0 ]; then
+            echo "Issue #$NUMBER has $blockers open blocked-by dependencies; leaving gaal for a maintainer to add."
+            exit 0
+          fi
+          if jq -e 'any(.labels[]; .name == "needs-human")' <<<"$issue" >/dev/null; then
+            echo "Issue #$NUMBER is labelled needs-human; leaving gaal for a maintainer to add."
+            exit 0
+          fi
+
           author=$(gh issue view "$NUMBER" --repo "$REPO" --json author --jq .author.login)
           # An API error fails the run rather than reading as "not a collaborator".
           perm=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .permission) \
