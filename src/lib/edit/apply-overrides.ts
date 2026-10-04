@@ -52,6 +52,10 @@ import {
 } from "./skills-categories.ts";
 import { joinAchievementType } from "../score/entry-dates.ts";
 import { classifyProfile, profilesFromUrls } from "../contact/profile-registry.ts";
+import {
+  deriveContactProfiles,
+  dedupeProfilesBySlug,
+} from "../contact/contact-profiles.ts";
 import type { LegacyLinkKey, ProfileLink } from "../score/types.ts";
 import type {
   ContactOverrides,
@@ -270,9 +274,12 @@ export type LegacyLinkFields = Pick<
  *     old `addedProfiles` behavior, and otherwise rides only in `profiles[]`.
  *
  * `profiles[]` is then re-derived from the (now-edited) four legacy slots in
- * precedence order plus the extras, classified + de-duped by slug — the mirror
- * every downstream reader consumes. Returns the per-slot confidence edits so the
- * caller can thread them into the edited `fieldConfidence`.
+ * precedence order plus the extras, classified + de-duped by slug — a
+ * PROVISIONAL, unstamped mirror. `applyOverrides` (the only caller that keeps
+ * this field) re-stamps it with `legacyKey` + the final post-edit confidence
+ * once that confidence exists (see `deriveContactProfiles` there) — this
+ * function runs too early to know it. Returns the per-slot confidence edits so
+ * the caller can thread them into the edited `fieldConfidence`.
  *
  * Exported (#428) so a caller can run just this cheap step against a 4-field
  * {@link LegacyLinkFields} probe to answer "did this move a legacy slot"
@@ -291,7 +298,9 @@ export function applyProfileOverrides(
     ...backfillLegacyFromExtras(nextParsed, extras),
   ];
 
-  // Re-derive the profiles mirror from the edited legacy slots + extras.
+  // Re-derive the provisional profiles mirror from the edited legacy slots +
+  // extras — `applyOverrides` re-stamps this below once it has the final
+  // confidence (see the docblock above).
   const profiles = profilesFromUrls([
     nextParsed.linkedin_url,
     nextParsed.github_url,
@@ -1536,6 +1545,25 @@ export function applyOverrides(
     contact,
     linkConfEdits,
   );
+  // Re-stamp `profiles[]` with `legacyKey` + the FINAL post-edit confidence
+  // (#422): `applyProfileOverrides` above already re-derived the legacy slots
+  // and a plain (unstamped) mirror, but it runs BEFORE `nextConfidence` exists,
+  // so that mirror can't carry the edited confidence. Rebuilding it here with
+  // `deriveContactProfiles` — the same function the scorer / ContactCard read
+  // `profiles[]` through — keeps a persisted edit in lockstep with what a
+  // fresh parse of the same slots + confidence would produce, so an
+  // empty-override round-trip stays a true no-op.
+  // `deriveContactProfiles` itself never collapses two legacy slots that share
+  // a URL (score.ts needs each slot addressable by its own key), so this
+  // PERSISTED mirror — which the ContactCard/export map over as a flat list —
+  // dedupes on top before it lands on `nextParsed.profiles`, or a link entered
+  // twice (e.g. the same URL corrected into two slots) renders twice (#1138
+  // review).
+  const nextProfiles = dedupeProfilesBySlug(
+    deriveContactProfiles(nextParsed, nextConfidence),
+  );
+  if (nextProfiles.length > 0) nextParsed.profiles = nextProfiles;
+  else delete nextParsed.profiles;
   applyExperienceHeaderOverrides(nextParsed.experience, experience);
 
   const byIndex = new Map<number, BulletObservation>();

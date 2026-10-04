@@ -73,7 +73,7 @@ describe("extractContact — email domain is not a website", () => {
   });
 });
 
-describe("extractContact — additive profiles[] mirrors the legacy link keys (#335)", () => {
+describe("extractContact — profiles[] is the canonical extraction source (#422)", () => {
   it("derives a profiles[] from the four legacy link values, in fixed order", () => {
     const lines: PdfLine[] = [
       mkLine("Jane Doe", 0),
@@ -86,11 +86,11 @@ describe("extractContact — additive profiles[] mirrors the legacy link keys (#
 
     const result = extractContact(profile, lines);
 
-    // Legacy keys are unchanged (still the scoring/snapshot source of truth).
+    // The legacy keys are DERIVED from profiles[] (#422), so they equal
+    // whatever their matching profiles[] entry carries — not the reverse.
     expect(result.linkedin_url).toBe("https://linkedin.com/in/jane");
     expect(result.github_url).toBe("https://github.com/jane");
 
-    // profiles[] mirrors those legacy values, classified + order-preserving.
     const byNetwork = result.profiles.map((p) => p.network);
     expect(byNetwork).toContain("LinkedIn");
     expect(byNetwork).toContain("GitHub");
@@ -111,6 +111,106 @@ describe("extractContact — additive profiles[] mirrors the legacy link keys (#
 
     const result = extractContact(profile, lines);
     expect(result.profiles).toEqual([]);
+  });
+
+  // Pins the ownership-flip invariant itself: each deprecated legacy key must
+  // equal the profiles[] entry whose legacyKey names that slot — including the
+  // primary-entry confidence, since that is what `deriveContactProfiles` /
+  // the 0.5 confidence floor reproduce the pre-consolidation slot semantics
+  // from.
+  it("each legacy key equals its matching profiles[] entry (legacyKey + confidence)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine(
+        "jane@uw.edu | linkedin.com/in/jane | github.com/jane | https://behance.net/jane",
+        10,
+      ),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    const result = extractContact(profile, lines);
+    const byKey = (key: (typeof result.profiles)[number]["legacyKey"]) =>
+      result.profiles.find((p) => p.legacyKey === key);
+
+    expect(byKey("linkedin_url")?.url).toBe(result.linkedin_url);
+    expect(byKey("linkedin_url")?.confidence).toBe(
+      result.confidence.linkedin_url,
+    );
+    expect(byKey("github_url")?.url).toBe(result.github_url);
+    expect(byKey("github_url")?.confidence).toBe(result.confidence.github_url);
+    expect(byKey("portfolio_url")?.url).toBe(result.portfolio_url);
+    expect(byKey("portfolio_url")?.confidence).toBe(
+      result.confidence.portfolio_url,
+    );
+    // No website candidate in this fixture — no entry, no legacy value.
+    expect(byKey("website_url")).toBeUndefined();
+    expect(result.website_url).toBeUndefined();
+  });
+
+  // The "slot present but classifyProfile can't parse it" case (#790's
+  // dotless-host guard): an authored hyperlink whose href has no dotted host
+  // still fills the portfolio_url slot (the annotation predicate only checks
+  // for the substring "portfolio"), but classifyProfile can't turn it into a
+  // known or even an unknown *dotted* host. `profileForLegacySlot` keeps the
+  // entry anyway — `{ network: url, kind: "other" }` on the slot's own
+  // normalized URL — exactly like `deriveContactProfiles` does for a legacy
+  // slot it can't classify.
+  it("keeps a present-but-unclassifiable slot as an 'other' profiles[] entry", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const annotations: PdfLinkAnnotation[] = [mkAnnotation("portfolio", 0)];
+
+    const result = extractContact(profile, [contactLine], annotations);
+
+    expect(result.portfolio_url).toBe("https://portfolio");
+    const entry = result.profiles.find((p) => p.legacyKey === "portfolio_url");
+    expect(entry).toEqual({
+      url: "https://portfolio",
+      network: "https://portfolio",
+      kind: "other",
+      legacyKey: "portfolio_url",
+      confidence: 0.95,
+    });
+  });
+
+  // Regression (#1138 review): a host-agnostic `/in/<handle>` redirect on a
+  // non-LinkedIn host satisfies BOTH the LinkedIn annotation predicate (the
+  // `isLinkedinRedirectUrl` fallback tier) and the GitHub predicate, so
+  // `linkedin.value` and `github.value` land on the identical URL. Deduping
+  // `profiles[]` by slug alone would keep only the first slot's entry and
+  // drop the other, silently returning `undefined` from `legacyUrlFor` for
+  // the dropped key even though its `confidence` entry stays non-zero.
+  it("keeps both legacy keys populated when one annotation satisfies both predicates", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const annotations: PdfLinkAnnotation[] = [
+      mkAnnotation("https://github.com/in/sample", 0),
+    ];
+
+    const result = extractContact(profile, [contactLine], annotations);
+
+    expect(result.linkedin_url).toBe("https://github.com/in/sample");
+    expect(result.github_url).toBe("https://github.com/in/sample");
+    expect(result.confidence.linkedin_url).toBeGreaterThan(0);
+    expect(result.confidence.github_url).toBeGreaterThan(0);
+  });
+
+  it("emits one profiles[] entry per URL when two legacy slots share it", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const annotations: PdfLinkAnnotation[] = [
+      mkAnnotation("https://github.com/in/sample", 0),
+    ];
+
+    const result = extractContact(profile, [contactLine], annotations);
+
+    // Legacy keys stay both populated, but the exported list carries the URL
+    // once (the first slot's entry, `linkedin_url`).
+    expect(result.profiles[0]?.legacyKey).toBe("linkedin_url");
+    expect(result.linkedin_url).toBe(result.github_url);
+    const urls = result.profiles.map((p) => p.url);
+    expect(urls.filter((u) => u === "https://github.com/in/sample")).toHaveLength(1);
+    expect(new Set(urls).size).toBe(urls.length);
   });
 });
 

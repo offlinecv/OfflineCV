@@ -119,10 +119,12 @@ function fieldsPopulated(parsed: HeuristicParsedResume): string[] {
   for (const [k, v] of Object.entries(parsed)) {
     if (v === undefined || v === null || v === "") continue;
     if (Array.isArray(v) && v.length === 0) continue;
-    // `profiles` (#335) is an additive mirror of the four legacy `*_url` link
-    // keys — it carries no new field-presence signal, so it is excluded here to
-    // keep the Phase-1 migration snapshot-safe (no re-bake). Phase 2 flips the
-    // legacy keys to `profiles` and re-bakes the corpus deliberately.
+    // `profiles` (#335) started as an additive mirror of the four legacy
+    // `*_url` link keys; #422 flipped the legacy keys to be DERIVED from it
+    // instead. Either direction, it carries no new field-presence signal
+    // beyond what the four legacy keys already report, and #422's own
+    // acceptance criteria require byte-identical snapshots (no re-bake) — so
+    // it stays excluded here.
     if (k === "profiles") continue;
     // `skillCategories` (#473) is an additive STRUCTURED view over `skills` — it
     // carries no new field-presence signal (its presence implies `skills`), so
