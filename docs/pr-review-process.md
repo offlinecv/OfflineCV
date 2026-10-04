@@ -10,7 +10,7 @@ opened by the Gaal coding agent? Use the checklist in
 ## The path
 
 ```
-claim an issue          comment on it; a maintainer adds `status:claimed`
+claim an issue          comment asking to be assigned; wait for the assignment
       ↓
 branch + commit         <your-initials>/<short-slug>, conventional prefix
       ↓
