@@ -108,7 +108,7 @@ jobs:
           # summaries) carry no location, so drop those before upload.
           node -e 'const fs=require("fs");const f="fallow.sarif";const j=JSON.parse(fs.readFileSync(f,"utf8"));const runs=j.runs||[];const driver=runs[0]&&runs[0].tool&&runs[0].tool.driver?runs[0].tool.driver:{name:"fallow"};const rules=[],results=[];for(const r of runs){if(r.tool&&r.tool.driver&&Array.isArray(r.tool.driver.rules))rules.push(...r.tool.driver.rules);if(Array.isArray(r.results))results.push(...r.results.filter(x=>Array.isArray(x.locations)&&x.locations.length>0))}j.runs=[{tool:{driver:{...driver,rules}},automationDetails:{id:"fallow/"},results}];fs.writeFileSync(f,JSON.stringify(j))'
       - name: upload fallow SARIF
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: fallow.sarif
           # Pin the analysis category explicitly (not only via the SARIF's
