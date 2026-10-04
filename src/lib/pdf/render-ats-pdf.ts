@@ -2123,6 +2123,12 @@ async function renderAtsResumePdfAtSize(
   // `TextEncoder` returns a Uint8Array from a DIFFERENT realm that fails that
   // check ("type NaN"). Copying into this module's Uint8Array normalizes the
   // realm — a harmless one-time copy in the browser, and the fix in tests.
+  //
+  // `model` here is already past the #672 one-anchor collapse, so a role with
+  // only an end date reaches `toJsonResume` as a start date too (#816) — even
+  // though `startDate`/`endDate` are independent optionals in JSON Resume and
+  // could have carried the pair uncollapsed. No reader exists under `src/` to
+  // care yet; see `edit/experience-dates.ts`'s docblock before building one.
   const resumeJsonBytes = new Uint8Array(
     new TextEncoder().encode(JSON.stringify(toJsonResume(model), null, 2)),
   );
