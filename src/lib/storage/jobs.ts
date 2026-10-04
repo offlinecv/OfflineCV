@@ -14,6 +14,7 @@ import {
   isLive,
   softDeleteRecord,
   runBatchedWrites,
+  updateRecord,
 } from "./crud.ts";
 import { deleteLettersForJob } from "./letters.ts";
 import type { JobRecord } from "./types.ts";
@@ -145,11 +146,12 @@ export interface ArchiveJobsOptions {
  * sequential and awaited, a row near the end of a ~290-row sweep is written
  * appreciably later than that decision, and anything may have happened to it
  * in between: another tab, the browser extension writing through `putRecord`,
- * or a sync. So each id is re-read through `getJob` and then put to
- * `stillEligible` immediately before its own write:
+ * or a sync. So each id is re-read and re-judged against `stillEligible`
+ * immediately before its own write, inside {@link updateRecord}'s single
+ * transaction (#763):
  *
- *  - **Gone** — deleted or merged away — `getJob` returns undefined and the
- *    row is skipped, rather than a `saveJob` resurrecting a tombstone.
+ *  - **Gone** — deleted, merged away, or tombstoned — the mutator declines and
+ *    the row is skipped, rather than resurrecting a tombstone.
  *  - **No longer eligible** — someone moved it to Applied — `stillEligible`
  *    answers false and the row is skipped the same way. Without this the
  *    sweep would overwrite that Applied status with `"archived"`, breaking
@@ -157,14 +159,13 @@ export interface ArchiveJobsOptions {
  *    ("Applied, Interviewing, Offer, and Rejected jobs are never touched")
  *    and destroying pipeline state the user built by hand.
  *
- * This narrows the window; it does not make the write atomic. `getJob` and
- * `saveJob` are two separate IndexedDB transactions, so a writer that lands
- * between them is still unseen. What changes is the size of the exposure: it
- * goes from "the entire duration of the sweep, for every row in it" to "the
- * gap between one row's read and its own write". Closing it completely would
- * need a read-modify-write inside a single transaction, which this layer does
- * not currently expose; the residual gap is recorded here rather than papered
- * over.
+ * The read and the write now share one IndexedDB transaction, so a writer
+ * that would have landed between them instead queues behind ours and runs
+ * only once it commits — the row can no longer be read here, changed by
+ * someone else, and then overwritten from stale in-memory data. Before #763,
+ * `getJob` and `saveJob` were two separate transactions and that gap was real;
+ * see `job-tracker.test.ts` for the regression test that pins the row-level
+ * atomicity this now guarantees.
  *
  * ## What the caller learns about a skip
  *
@@ -186,10 +187,12 @@ export async function archiveJobs(
   return runBatchedWrites(async () => {
     const archived: JobRecord[] = [];
     for (const id of ids) {
-      const existing = await getJob(id);
-      if (existing === undefined) continue;
-      if (!options.stillEligible(existing)) continue;
-      archived.push(await saveJob({ ...existing, status: "archived", id }));
+      const updated = await updateRecord<JobRecord>("jobs", id, (existing) => {
+        if (existing === undefined || !isLive(existing)) return undefined;
+        if (!options.stillEligible(existing)) return undefined;
+        return { ...existing, status: "archived", id };
+      });
+      if (updated !== undefined) archived.push(updated);
     }
     return archived;
   });
