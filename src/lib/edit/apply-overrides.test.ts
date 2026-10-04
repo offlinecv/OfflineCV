@@ -1310,6 +1310,8 @@ describe("applyOverrides — profiles[] (#335)", () => {
         url: "https://linkedin.com/in/corrected",
         network: "LinkedIn",
         kind: "social",
+        legacyKey: "linkedin_url",
+        confidence: 1,
       },
     ]);
   });
@@ -1338,7 +1340,13 @@ describe("applyOverrides — profiles[] (#335)", () => {
     );
     expect(out.linkedin_url).toBeUndefined();
     expect(out.profiles).toEqual([
-      { url: "https://github.com/jane", network: "GitHub", kind: "code" },
+      {
+        url: "https://github.com/jane",
+        network: "GitHub",
+        kind: "code",
+        legacyKey: "github_url",
+        confidence: 0,
+      },
     ]);
   });
 
@@ -1358,9 +1366,21 @@ describe("applyOverrides — profiles[] (#335)", () => {
       },
     );
     expect(out.profiles).toEqual([
-      { url: "https://linkedin.com/in/jane", network: "LinkedIn", kind: "social" },
-      { url: "https://github.com/jane", network: "GitHub", kind: "code" },
-      { url: "https://gitlab.com/jane", network: "GitLab", kind: "code" },
+      {
+        url: "https://linkedin.com/in/jane",
+        network: "LinkedIn",
+        kind: "social",
+        legacyKey: "linkedin_url",
+        confidence: 0,
+      },
+      {
+        url: "https://github.com/jane",
+        network: "GitHub",
+        kind: "code",
+        legacyKey: "github_url",
+        confidence: 0,
+      },
+      { url: "https://gitlab.com/jane", network: "GitLab", kind: "code", confidence: 1 },
     ]);
   });
 
@@ -1380,7 +1400,12 @@ describe("applyOverrides — profiles[] (#335)", () => {
       },
     );
     expect(out.profiles).toEqual([
-      { url: "https://example.dev/jane", network: "example.dev", kind: "other" },
+      {
+        url: "https://example.dev/jane",
+        network: "example.dev",
+        kind: "other",
+        confidence: 1,
+      },
     ]);
   });
 
@@ -1400,9 +1425,56 @@ describe("applyOverrides — profiles[] (#335)", () => {
       },
     );
     expect(out.profiles).toEqual([
-      { url: "https://linkedin.com/in/jane", network: "LinkedIn", kind: "social" },
-      { url: "https://github.com/jane", network: "GitHub", kind: "code" },
+      {
+        url: "https://linkedin.com/in/jane",
+        network: "LinkedIn",
+        kind: "social",
+        legacyKey: "linkedin_url",
+        confidence: 0,
+      },
+      {
+        url: "https://github.com/jane",
+        network: "GitHub",
+        kind: "code",
+        legacyKey: "github_url",
+        confidence: 0,
+      },
     ]);
+  });
+
+  // Regression (#1138 review): `deriveContactProfiles`'s own legacy loop keeps
+  // one entry PER slot even when two slots share a URL (score.ts needs each
+  // addressable by its own `legacyKey`), so correcting one slot to another
+  // slot's existing URL must not persist as two duplicate `ProfileLink`s in
+  // the display mirror — `applyOverrides` dedupes that mirror by slug before
+  // assigning it to `out.profiles`.
+  it("collapses a legacy correction that duplicates another slot's URL in the persisted mirror", () => {
+    const { fields: out } = applyOverrides(
+      {
+        parsed: parsedWithLinks(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
+        {
+          id: "profile:0",
+          url: "https://github.com/jane",
+          network: "GitHub",
+          kind: "code",
+          legacyKey: "linkedin_url",
+        },
+      ],
+      },
+    );
+    expect(out.linkedin_url).toBe("https://github.com/jane");
+    expect(out.github_url).toBe("https://github.com/jane");
+    const matches = out.profiles?.filter(
+      (p) => p.url === "https://github.com/jane",
+    );
+    expect(matches).toHaveLength(1);
   });
 
   it("does not mutate the input parsed object when re-mirroring", () => {

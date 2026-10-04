@@ -60,9 +60,12 @@ export interface SkillInferred {
 // A contributor-extensible replacement for the four hardcoded link slots
 // (`linkedin_url`, `github_url`, `portfolio_url`, `website_url`). Each detected
 // contact link becomes one `ProfileLink`, classified against the host registry
-// in `src/lib/contact/profile-registry.ts`. Phase 1 (#335) populates this
-// additively — the four legacy keys stay the source of truth for scoring and
-// corpus snapshots; #334's `toJsonResume()` maps this to `basics.profiles`.
+// in `src/lib/contact/profile-registry.ts`. Phase 1 (#335) populated this
+// additively, mirroring the four legacy keys; #427 made it the read path for
+// scoring, the contact display and JSON-Resume export. #422 flips the WRITE
+// side too: extraction now builds this list first and the four legacy keys
+// (`@deprecated` below) are derived from it, kept populated for one release.
+// #334's `toJsonResume()` maps this to `basics.profiles`.
 
 /** The four legacy `*_url` contact slots a profile can be the primary entry
  *  for (#427). A profile carrying one of these is the source of that legacy
@@ -351,13 +354,26 @@ export interface ResumeData {
    *  that discloses. It is also never derived into a job-search query — see
    *  `job-search/providers/keywords.ts`, the sole résumé-derived egress helper. */
   work_authorization?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"linkedin_url"`. Kept populated for one release; read
+   *  `profiles` directly for new code. */
   linkedin_url?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"portfolio_url"`. Kept populated for one release; read
+   *  `profiles` directly for new code. */
   portfolio_url?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"github_url"`. Kept populated for one release; read
+   *  `profiles` directly for new code. */
   github_url?: string;
+  /** @deprecated Derived from `profiles[]` (#422) — the entry whose
+   *  `legacyKey` is `"website_url"`. Kept populated for one release; read
+   *  `profiles` directly for new code. */
   website_url?: string;
-  /** Contributor-extensible classified contact links (#335). Additive in
-   *  Phase 1 — mirrors the four legacy `*_url` keys above (which remain the
-   *  scoring/snapshot source of truth). #334 maps this to `basics.profiles`. */
+  /** Contributor-extensible classified contact links (#335). CANONICAL since
+   *  #422 — extraction builds this first and derives the four legacy `*_url`
+   *  keys above from it, rather than the reverse. #334 maps this to
+   *  `basics.profiles`. */
   profiles?: ProfileLink[];
   summary?: string;
   skills: string[];
