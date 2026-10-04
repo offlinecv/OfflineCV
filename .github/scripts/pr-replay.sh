@@ -48,13 +48,10 @@ STATUS_MARKER='<!-- gaal:rebase-status -->'
 # their agent starts, so this is the copy next to this script, never the work tree's.
 # shellcheck source=/dev/null # BLOCKED_PATHS, ATTRIBUTION
 . "$(dirname "${BASH_SOURCE[0]}")/publish-policy.sh"
-GAAL_LOGIN=gaal-agent
+# A PR carrying this label is never rebased automatically; `/gaal rebase` still works.
+OPT_OUT_LABEL=no-auto-rebase
 
 die() { echo "pr-replay: $*" >&2; exit 1; }
-
-# `gh pr list` prints an app author as `app/gaal-agent`, REST as `gaal-agent[bot]`,
-# GraphQL as `gaal-agent`.
-is_gaal() { local l=${1#app/}; [ "${l%\[bot\]}" = "$GAAL_LOGIN" ]; }
 
 graphql() { gh api graphql -F owner="${REPO%/*}" -F name="${REPO#*/}" "$@"; }
 
@@ -86,7 +83,7 @@ cmd_resolve() {
       defaultBranchRef{ name }
       pullRequest(number:$n){
         number state isDraft isCrossRepository isInMergeQueue mergeable
-        author{ login } baseRefName headRefName headRefOid
+        author{ login } baseRefName headRefName headRefOid labels(first:50){ nodes{ name } }
         timelineItems(itemTypes:[BASE_REF_CHANGED_EVENT], last:50){ nodes{
           ... on BaseRefChangedEvent{ previousRefName } } } } } }' --jq .data.repository)
   pr=$(jq -c .pullRequest <<<"$repo")
@@ -120,6 +117,7 @@ cmd_resolve() {
   jq -c --arg default "$default" --arg target "$target" --argjson known "$known" '{
       pr: .number, state, draft: .isDraft, cross: .isCrossRepository,
       inQueue: .isInMergeQueue, mergeable, author: .author.login,
+      labels: [.labels.nodes[]?.name],
       headRef: .headRefName, headSha: .headRefOid, baseRef: .baseRefName,
       default: $default, target: $target, known: ($known | unique)
     }' <<<"$pr"
@@ -288,11 +286,11 @@ cmd_note() {
   rm -f "$body"
 }
 
-# Which Gaal PRs this event may have left behind.
-#   push to the default branch → open Gaal PRs on it that now CONFLICT. One that
+# Which PRs this event may have left behind.
+#   push to the default branch → open PRs on it that now CONFLICT. One that
 #     is merely behind is left alone: the merge queue tests it against current
 #     main anyway, and a rebase would cost CI, a bot review and an approval.
-#   a PR pushed or merged (HEAD_REF) → open Gaal PRs stacked on its branch. They
+#   a PR pushed or merged (HEAD_REF) → open PRs stacked on its branch. They
 #     are replayed even without a conflict, or their diff keeps showing the
 #     parent's superseded change.
 #   a PR opened or reopened (PR_NUMBER) → that PR, if it already CONFLICTS.
@@ -327,10 +325,13 @@ cmd_select() {
     *) die "unknown event $EVENT" ;;
   esac
 
+  # Gaal's PRs and people's alike; a person who would rather rebase their own
+  # branch labels it `no-auto-rebase`. Never a fork: nothing here may push to one.
   local candidates=() picked=() pending=() round
-  for n in $(jq -r '.[] | select((.isDraft | not) and (.isCrossRepository | not))
-                    | "\(.number) \(.author.login)"' <<<"$list" | sort -n |
-             while read -r num login; do is_gaal "$login" && echo "$num"; done); do
+  for n in $(jq -r --arg optout "$OPT_OUT_LABEL" '.[]
+                    | select((.isDraft | not) and (.isCrossRepository | not)
+                             and ([.labels[]?.name] | index($optout) | not))
+                    | .number' <<<"$list" | sort -n); do
     candidates+=("$n")
   done
 

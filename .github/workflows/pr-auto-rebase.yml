@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The offlinecv Authors
 #
-# Keep Gaal's PRs mergeable without anyone asking. When the branch a Gaal PR is
-# based on moves, the PR is replayed onto it (.github/scripts/pr-replay.sh, the
-# same replay `/gaal rebase` uses):
-#   - push to main          → every open Gaal PR on main that now CONFLICTS. One
+# Keep PRs mergeable without anyone asking. When the branch a PR is based on
+# moves, the PR is replayed onto it (.github/scripts/pr-replay.sh, the same
+# replay `/gaal rebase` uses):
+#   - push to main          → every open PR on main that now CONFLICTS. One
 #                             that is merely behind is left alone: the merge queue
 #                             tests it against current main anyway, and a rebase
 #                             would cost CI, a bot review and possibly an approval.
-#   - a PR pushed or merged → every open Gaal PR stacked on that PR's branch, even
+#   - a PR pushed or merged → every open PR stacked on that PR's branch, even
 #                             without a conflict, or its diff keeps showing the
 #                             parent's superseded change. A merged parent's
 #                             children are retargeted to its base.
@@ -31,14 +31,18 @@
 # the gates, is labelled `needs-human` with a comment saying what conflicted —
 # a human decides the hard ones.
 #
-# Human PRs are never touched: force-pushing a person's branch under them is a
-# surprise even with the lease. They can ask with `/gaal rebase`.
+# People's PRs are replayed exactly like Gaal's: same-repo branches only (never
+# a fork), and only when the author has write access, the bar `/gaal` sets. The
+# push is under a lease, so it never overwrites a newer push, but it does move
+# the branch under the author's local checkout; the status comment says how to
+# catch up. A PR labelled `no-auto-rebase` is skipped, for an author who would
+# rather rebase by hand (`/gaal rebase` still works on it).
 #
 # Trust: every trigger runs this file from the default branch (the dispatch
 # names `--ref` explicitly), and the replay script is copied from that checkout before any PR code
 # lands in the work tree, so a PR cannot change what rebases it. The agent sees
-# only Gaal-authored PRs, whose text comes from write-access issues (see
-# gaal-agent.yml), under the same egress block and no-push-token rules.
+# only PRs written by someone with write access, or by Gaal from a write-access
+# issue (see gaal-agent.yml), under the same egress block and no-push-token rules.
 # Each PR keeps ONE status comment (replaced, not appended). A clean replay's
 # comment carries a marker pr-review.yml reads to skip re-reviewing an unchanged
 # change. Kill switch: repo variable PR_AUTO_REBASE=false.
@@ -58,7 +62,7 @@ on: # zizmor: ignore[dangerous-triggers]
   workflow_dispatch:
     inputs:
       pr:
-        description: Gaal PR number to rebase
+        description: PR number to rebase
         required: true
         type: number
       agent:
@@ -178,9 +182,20 @@ jobs:
 
           "$replay" resolve "$PR" > "$RUNNER_TEMP/pr.json"
           # The event is a few minutes old by now; re-check against the live PR.
-          jq -e --arg bot "${APP_BOT%\[bot\]}" '.state == "OPEN" and (.draft | not) and (.cross | not)
-              and (.inQueue | not) and .author == $bot' "$RUNNER_TEMP/pr.json" >/dev/null ||
-            { echo "PR #$PR is no longer an open, queue-free Gaal PR; skipping."; exit 0; }
+          jq -e '.state == "OPEN" and (.draft | not) and (.cross | not) and (.inQueue | not)
+              and (.labels | index("no-auto-rebase") | not)' "$RUNNER_TEMP/pr.json" >/dev/null ||
+            { echo "PR #$PR is no longer open, same-repo, out of the queue and not opted out; skipping."; exit 0; }
+          # The PR's text reaches the agent, so its author must clear the bar `/gaal`
+          # sets. Gaal's own text comes from a write-access issue; its bot is not a
+          # collaborator, so it is not asked.
+          author=$(jq -r .author "$RUNNER_TEMP/pr.json")
+          if [ "$author" != "${APP_BOT%\[bot\]}" ]; then
+            perm=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .permission)
+            case "$perm" in
+              admin|maintain|write) ;;
+              *) echo "PR #$PR's author $author has '$perm' permission, not write; skipping."; exit 0 ;;
+            esac
+          fi
 
           "$replay" apply "$RUNNER_TEMP/pr.json" | tee "$RUNNER_TEMP/replay.env"
           # Only our key=value lines (a push hook or tool may print more), re-quoted with
@@ -190,6 +205,7 @@ jobs:
           . "$RUNNER_TEMP/replay.vars"
           grep -E '^[a-z_]+=' "$RUNNER_TEMP/replay.env" >> "$GITHUB_OUTPUT"
           {
+            echo "author=$author"
             echo "head_sha=$(jq -r .headSha "$RUNNER_TEMP/pr.json")"
             echo "base_ref=$(jq -r .baseRef "$RUNNER_TEMP/pr.json")"
             echo "branch=$(jq -r .headRef "$RUNNER_TEMP/pr.json")"
@@ -321,6 +337,7 @@ jobs:
           GITHUB_TOKEN_RO: ${{ github.token }}
           BRANCH: ${{ steps.prep.outputs.branch }}
           HEAD_SHA: ${{ steps.prep.outputs.head_sha }}
+          AUTHOR: ${{ steps.prep.outputs.author }}
           BASE_REF: ${{ steps.prep.outputs.base_ref }}
           TARGET: ${{ steps.prep.outputs.target }}
           TIP: ${{ steps.prep.outputs.tip }}
@@ -341,18 +358,24 @@ jobs:
           . "$RUNNER_TEMP/publish.vars"
 
           where="\`$TARGET\` @ ${TIP:0:7}${retargeted:+ (retargeted: the old base \`$BASE_REF\` has merged)}"
+          # A person may have the branch checked out; Gaal never does.
+          catchup=""
+          [ "$AUTHOR" = "${APP_BOT%\[bot\]}" ] ||
+            catchup="
+
+          @$AUTHOR: the branch was rewritten. If you have it checked out, catch up with \`git fetch origin && git reset --hard origin/$BRANCH\` (not \`git pull\`, which merges the old commit back in). Label the PR \`no-auto-rebase\` to rebase it yourself from now on."
           case "$result" in
             pushed)
               if [ "$STATUS" = clean ]; then
                 # pr-review.yml skips re-reviewing this head: the PR's change is unchanged.
                 note "Rebased onto $where automatically; no conflicts, so the change itself is unchanged.
-          <!-- gaal:clean-replay $sha -->"
+          <!-- gaal:clean-replay $sha -->$catchup"
               else
                 summary=$(cat "$RUNNER_TEMP/resolution.md" 2>/dev/null || echo "_(the agent left no summary)_")
                 # shellcheck disable=SC2016 # the backticks are Markdown, not a substitution
                 note "**Rebased onto $where, resolving conflicts** in $(tr ' ' '\n' <<<"${CONFLICT_FILES:-}" | sed 's/.*/`&`/' | paste -sd' ' -). Review the resolution as new code:
 
-          $summary"
+          $summary$catchup"
               fi ;;
             moved) echo "The branch moved during the run; the push that moved it starts the next check." ;;
             empty) note "With the conflicts resolved, this PR no longer changes anything in \`$TARGET\`. It can probably be closed." ;;

@@ -95,7 +95,7 @@ jobs:
           | `/gaal rebase` | Bring this PR up to date with its base branch. Conflicts are resolved by Gaal; a clean rebase runs no agent at all. |
           | `/gaal help` | This list. |
 
-          Every `/gaal` run starts by rebasing onto the PR's base, so `/gaal <change>` on a conflicting PR resolves the conflict too. Gaal's own PRs are also rebased automatically when they conflict (`pr-auto-rebase.yml`); a conflict too large to hand to an agent is labelled `needs-human` instead.
+          Every `/gaal` run starts by rebasing onto the PR's base, so `/gaal <change>` on a conflicting PR resolves the conflict too. Open PRs are also rebased automatically when they conflict, people's as well as Gaal's (`pr-auto-rebase.yml`); a conflict too large to hand to an agent is labelled `needs-human` instead, and a PR labelled `no-auto-rebase` is left alone.
           EOF
           sed -i 's/^          //' "$RUNNER_TEMP/help.md"
           gh pr comment "$NUMBER" --repo "$REPO" --body-file "$RUNNER_TEMP/help.md"

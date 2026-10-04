@@ -444,7 +444,7 @@ const resolvePr = () => JSON.parse(run(dir, ["resolve", "7"]));
 describe("resolve", () => {
   it("a main-based PR targets main with nothing known", () => {
     graphPr();
-    expect(resolvePr()).toMatchObject({ target: "main", baseRef: "main", known: [], author: "gaal-agent" });
+    expect(resolvePr()).toMatchObject({ target: "main", baseRef: "main", known: [], author: "gaal-agent", labels: [] });
   });
 
   it("an open parent is the target, and every head it ever had is known", () => {
@@ -509,20 +509,37 @@ describe("select", () => {
   const mergeable = (n, ...states) => writeFileSync(join(fake, `mergeable-${n}`), states.join("\n") + "\n");
   const select = (extra) => JSON.parse(run(dir, ["select"], { MERGEABLE_POLL_SECONDS: "0", ...extra }));
 
-  it("on a push to main: only conflicting Gaal PRs, oldest first, agent budget to the first", () => {
+  it("on a push to main: only conflicting PRs, Gaal's and people's, oldest first, agent budget to the first", () => {
     list("main", [[12, "app/gaal-agent"], [10, "app/gaal-agent"], [11, "someone"], [13, "app/gaal-agent", true], [14, "app/gaal-agent"]]);
     mergeable(10, "UNKNOWN", "UNKNOWN", "CONFLICTING");
+    mergeable(11, "CONFLICTING");
     mergeable(12, "MERGEABLE");
     mergeable(14, "CONFLICTING");
-    expect(select({ EVENT: "push", DEFAULT_BRANCH: "main", AGENT_CAP: "1" })).toEqual([
+    expect(select({ EVENT: "push", DEFAULT_BRANCH: "main", AGENT_CAP: "2" })).toEqual([
       { pr: 10, agent: true },
+      { pr: 11, agent: true },
       { pr: 14, agent: false },
     ]);
   });
 
-  it("on a PR push or merge: every Gaal PR stacked on its branch", () => {
+  it("on a PR push or merge: every PR stacked on its branch, whoever opened it", () => {
     list("gaal_issue-5", [[21, "app/gaal-agent"], [22, "someone"]]);
-    expect(select({ EVENT: "pull_request_target", HEAD_REF: "gaal/issue-5" })).toEqual([{ pr: 21, agent: true }]);
+    expect(select({ EVENT: "pull_request_target", HEAD_REF: "gaal/issue-5" })).toEqual([
+      { pr: 21, agent: true },
+      { pr: 22, agent: true },
+    ]);
+  });
+
+  it("never a PR labelled no-auto-rebase, on any event", () => {
+    list("main", [[50, "someone", false, ["no-auto-rebase"]], [51, "app/gaal-agent", false, ["no-auto-rebase"]], [52, "someone"]]);
+    mergeable(52, "CONFLICTING");
+    expect(select({ EVENT: "push", DEFAULT_BRANCH: "main" })).toEqual([{ pr: 52, agent: true }]);
+    mergeable(52, "CONFLICTING");
+    expect(select({ EVENT: "schedule", DEFAULT_BRANCH: "main" })).toEqual([{ pr: 52, agent: true }]);
+    list("feat-x", [[53, "someone", false, ["no-auto-rebase"]]]);
+    expect(select({ EVENT: "pull_request_target", HEAD_REF: "feat-x" })).toEqual([]);
+    view([54, "someone", false, ["no-auto-rebase"]]);
+    expect(select({ EVENT: "pull_request_target", ACTION: "opened", PR_NUMBER: "54" })).toEqual([]);
   });
 
   it("on a PR opened already conflicting (#1104): that PR, with no base move needed", () => {
@@ -531,11 +548,12 @@ describe("select", () => {
     expect(select({ EVENT: "pull_request_target", ACTION: "opened", PR_NUMBER: "31" })).toEqual([{ pr: 31, agent: true }]);
   });
 
-  it("on a PR opened merely behind, or by a human: nothing", () => {
+  it("on a PR opened merely behind: nothing, whoever opened it", () => {
     view([32, "app/gaal-agent"]);
     mergeable(32, "MERGEABLE");
     expect(select({ EVENT: "pull_request_target", ACTION: "reopened", PR_NUMBER: "32" })).toEqual([]);
     view([33, "someone"]);
+    mergeable(33, "MERGEABLE");
     expect(select({ EVENT: "pull_request_target", ACTION: "opened", PR_NUMBER: "33" })).toEqual([]);
   });
 
