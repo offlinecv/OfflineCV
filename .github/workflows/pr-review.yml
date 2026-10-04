@@ -19,6 +19,10 @@
 # filed. Repo settings let Actions approve PRs, so the review job dismisses any
 # approval it leaves — delete that step to let bot approvals count.
 #
+# A green Review step does not prove a review was posted (#1119: a run on
+# #1114 finished `success` and posted nothing), so the job then asserts that
+# this run left a review on the head it was started for.
+#
 # Loop: the `revise` job then runs pr-revise.yml on the review's open threads;
 # its push starts the next run of this workflow, up to PR_REVISE_MAX_ROUNDS.
 name: PR review
@@ -118,7 +122,23 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # The baseline for the assert below: a review already on this head from an
+      # earlier attempt or event (a re-run, `reopened`) must not count. IDs, not
+      # a timestamp: `.submitted_at` is GitHub's clock and `date` is the
+      # runner's, so any skew between them would miss a real review or admit an
+      # old one.
+      - name: Record the reviews already on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/pulls/$PR/reviews" |
+            jq -s '[.[][].id]' > "$RUNNER_TEMP/reviews-before.json"
+
       - name: Review
+        id: review
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
@@ -148,6 +168,45 @@ jobs:
             - Drop hedging ("might", "perhaps"), restating the diff, and praise.
             - Exception: a security or architecture finding gets one short
               paragraph with the why — then back to one-liners.
+
+      # The action reports `success` when the model stops, whether or not it
+      # posted. Count the reviews this run left: the identity `github_token`
+      # posts as, on the head this run was started for, absent from the snapshot
+      # taken before the step, not PENDING (nobody else can see one), with a
+      # body — a thread reply is a review with an empty one, and pr-revise.yml
+      # replies under the same identity. Runs only after a successful Review; a
+      # failed one has already failed the job. A push that lands while the
+      # review is posting moves the review to the new head and fails this run,
+      # which only marks the superseded head — the new head gets its own run.
+      - name: Assert this run posted a review for the head SHA
+        if: steps.review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # --paginate prints one array per page; -s and .[][] join them.
+          n=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" |
+            jq -s --arg sha "$HEAD_SHA" --slurpfile before "$RUNNER_TEMP/reviews-before.json" \
+              '[.[][] | select(.user.login == "github-actions[bot]"
+                and (.id as $id | $before[0] | index($id) | not)
+                and .commit_id == $sha
+                and .state != "PENDING"
+                and ((.body // "") | test("\\S")))] | length')
+          if [ "$n" -eq 0 ]; then
+            # The skill stops without posting on a PR that is no longer open, so a
+            # PR closed during the cooldown or the review is not a missed review.
+            state=$(gh pr view "$PR" --repo "$REPO" --json state -q .state)
+            if [ "$state" != OPEN ]; then
+              echo "PR #$PR is $state; nothing to assert."
+              exit 0
+            fi
+            echo "::error::The review step succeeded but posted no review on PR #$PR for head $HEAD_SHA (none new from github-actions[bot] since the step began)."
+            exit 1
+          fi
+          echo "Found $n review(s) on PR #$PR for head $HEAD_SHA."
 
       # Actions may approve PRs in this repo and `main` needs one approval, so a
       # bot APPROVE would let an agent-written PR merge unread. The prompt asks
