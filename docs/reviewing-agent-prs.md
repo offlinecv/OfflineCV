@@ -85,3 +85,11 @@ You can also ask for a rebase yourself, on any PR, with a comment:
 - its PR was closed unmerged, or merged without closing the issue (a partial fix that says `Refs #N`).
 
 So the labelled issues are always the live ones. To retry, fix the cause (usually by sharpening or splitting the issue), then add `gaal` again.
+
+Triage adds `gaal` itself to a ready issue whose author has write access, with three opt-outs. It still adds `ready-for-agent`, but leaves `gaal` for a maintainer to add by hand when the issue has:
+
+- an assignee (a person owns it);
+- an open blocked-by dependency;
+- the `needs-human` label.
+
+The check reads them when triage runs, about a minute after filing, so a dependency or assignee added later is not seen; remove `gaal` yourself in that case.
