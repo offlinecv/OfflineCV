@@ -182,6 +182,75 @@ export async function getRecord<T extends StoredRecord>(
 }
 
 /**
+ * Read a record and write it back inside ONE IndexedDB transaction (#763).
+ *
+ * Every write above this — `putRecord`, `softDeleteRecord` — reads through one
+ * `idb` shorthand call and writes through another, and each shorthand call
+ * opens its own transaction. A caller with a decision to make in between (read
+ * a row, check something about it, write it back) has a gap for another
+ * writer to land in unseen; `archiveJobs` (`jobs.ts`) is the case that carried
+ * that gap in its own docblock rather than papering over it, and this
+ * function is what closes it: the `get` and the `put` share one transaction,
+ * so nothing else touching this store can be interleaved between them.
+ *
+ * `mutate` receives the CURRENT row — `undefined` if there isn't one — and
+ * returns the row to write, or `undefined` to leave the store untouched.
+ * `undefined` means "don't", the same convention `ArchiveJobsOptions.stillEligible`
+ * already uses: nothing is written and no change signal fires on that branch,
+ * matching "a read posts none" everywhere else in this file.
+ *
+ * `mutate` MUST be synchronous, and the type — not just this comment — is what
+ * enforces it: an `await` inside it would suspend past the current microtask
+ * with the transaction still open, and IndexedDB auto-commits a transaction
+ * the instant control returns to the event loop with no request pending on
+ * it. An async mutator would make the transaction close out from under it,
+ * silently reopening the exact gap this function exists to close — and doing
+ * so invisibly, unlike the two-call shape it replaces. A synchronous decision
+ * — a status check, an eligibility predicate — is the whole use case; anything
+ * that needs an `await` belongs before the call, not inside it.
+ *
+ * `updatedAt` is stamped here the same way `putRecord` stamps it, so a caller
+ * doesn't have to reach for `monotonicNow` itself to get that guarantee.
+ * `options.touch` mirrors `putRecord`'s: pass `touch: false` when the mutation
+ * isn't the kind of change that should float a row to the top of a
+ * most-recently-updated list (see `clearLetterResumeLink`'s use of the same
+ * flag on `putRecord`).
+ */
+export async function updateRecord<T extends StoredRecord>(
+  store: StoreName,
+  id: string,
+  mutate: (current: T | undefined) => T | undefined,
+  options: { touch?: boolean } = {},
+): Promise<T | undefined> {
+  const db = await looseDB();
+  const tx = db.transaction(store, "readwrite");
+  // `idb` creates `tx.done` the moment the transaction is wrapped. If a request
+  // below rejects we exit before the final `await tx.done`, and that promise
+  // then rejects with nobody listening — a second, unhandled rejection beside
+  // the one the caller already catches. This no-op handler only marks it
+  // handled; the final `await tx.done` still propagates a commit failure.
+  void tx.done.catch(() => {});
+  const existing = (await tx.store.get(id)) as T | undefined;
+  const next = mutate(existing);
+  if (next === undefined) {
+    await tx.done;
+    return undefined;
+  }
+  const now = monotonicNow();
+  const written = {
+    ...next,
+    updatedAt:
+      options.touch === false
+        ? (next.updatedAt ?? existing?.updatedAt ?? now)
+        : now,
+  } as T;
+  await tx.store.put(written);
+  await tx.done;
+  emitChange(store);
+  return written;
+}
+
+/**
  * Every record in a store — **excluding tombstones by default** (#730).
  *
  * The default is the safe direction, and it is chosen rather than inherited: a

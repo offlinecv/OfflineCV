@@ -19,7 +19,7 @@
 
 import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   settleWithoutDelivery,
   waitForDelivery,
@@ -32,11 +32,16 @@ import {
   clearStore,
   softDeleteRecord,
   runBatchedWrites,
+  updateRecord,
 } from "./crud.ts";
 import { getAllRecords, getRecord } from "./crud.ts";
 import { saveJob, archiveJobs } from "./jobs.ts";
 import { importAll } from "./backup.ts";
 import type { JobRecord, StorageExport } from "./types.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(async () => {
   await closeDB();
@@ -158,6 +163,65 @@ describe("crud.ts: writes post one change signal each, reads post none (#760)", 
       expect(listener.received).toEqual([]);
     } finally {
       listener.close();
+    }
+  });
+
+  it("updateRecord posts one message when the mutator actually writes (#763)", async () => {
+    await putRecord<JobRecord>("jobs", { id: "job-1", title: "SWE", company: "Acme", status: "interested" });
+    const listener = listenForChanges();
+    try {
+      const updated = await updateRecord<JobRecord>("jobs", "job-1", (existing) =>
+        existing === undefined ? undefined : { ...existing, status: "applied" },
+      );
+      expect(updated?.status).toBe("applied");
+      await waitForDelivery(() =>
+        expect(listener.received).toEqual([{ store: "jobs" }]),
+      );
+    } finally {
+      listener.close();
+    }
+  });
+
+  it("updateRecord posts nothing when the mutator declines to write", async () => {
+    await putRecord<JobRecord>("jobs", { id: "job-1", title: "SWE", company: "Acme", status: "interested" });
+    const listener = listenForChanges();
+    try {
+      const updated = await updateRecord<JobRecord>("jobs", "job-1", () => undefined);
+      expect(updated).toBeUndefined();
+      await settleWithoutDelivery();
+      expect(listener.received).toEqual([]);
+    } finally {
+      listener.close();
+    }
+  });
+
+  it("updateRecord leaves no unhandled tx.done rejection when a request fails", async () => {
+    await putRecord<JobRecord>("jobs", { id: "job-1", title: "SWE", company: "Acme", status: "interested" });
+    // Abort the transaction right after the write is issued: the put request
+    // and `tx.done` both reject, but `updateRecord` only awaits the former.
+    const realPut = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["put"]>
+    ) {
+      const request = realPut.apply(this, args);
+      this.transaction.abort();
+      return request;
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await expect(
+        updateRecord<JobRecord>("jobs", "job-1", (existing) =>
+          existing === undefined ? undefined : { ...existing, status: "applied" },
+        ),
+      ).rejects.toBeDefined();
+      // unhandledRejection fires after the microtask queue drains.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
     }
   });
 });
