@@ -24,6 +24,7 @@ import {
   LONE_LINE_BULLET_GLYPHS,
   SCORER_BULLET_GLYPHS,
 } from "../heuristics/bullet-glyphs.ts";
+import { MONTH } from "../heuristics/regex.ts";
 import { assignBulletIds } from "./bullet-id.ts";
 import { isContentlessBulletLine } from "./group-bullets.ts";
 import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
@@ -239,9 +240,13 @@ const STRONG_METRIC_PATTERNS = [
 const YEAR_TOKEN = /\b(19|20)\d{2}\b/g;
 const ANY_DIGIT = /\d/;
 
-/** Month names (incl. "Sept"), for anchoring redaction tokens to a date slot. */
-const MONTH_NAME =
-  "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?";
+/**
+ * Month names (incl. "Sept"), for anchoring redaction tokens to a date slot.
+ * Derived from `regex.ts`'s exported {@link MONTH} so the two never drift;
+ * the trailing `\.?` (an abbreviation dot, e.g. "Aug.") stays local to this
+ * call site rather than folding into `MONTH` itself.
+ */
+const MONTH_NAME = `${MONTH}\\.?`;
 
 /**
  * Year-position redaction placeholders in a *date* context (#31). Résumé
