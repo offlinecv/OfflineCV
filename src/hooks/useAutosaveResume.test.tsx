@@ -376,6 +376,47 @@ describe("useAutosaveResume: pristine base + delta pass-through (#768)", () => {
     expect(trackResumeSaved).not.toHaveBeenCalled();
   });
 
+  it("adopting a delta whose relocated-end parking names a re-minted id does not fire a spurious write", async () => {
+    // Regression (#819/#1136 review): a parked end date (#814) for an added
+    // experience entry is keyed by `addedAnchorKey(entry.id)` — `"added:" +
+    // id` — the same id `replay()` re-mints from zero on a fresh hook. A
+    // saved parking key naming a non-zero id (the user added a second role,
+    // or deleted an earlier add before saving) must still compare equal to
+    // its replayed counterpart once the id is re-minted, the same way an
+    // added entry's own id already does above.
+    const restoredEdit = {
+      ...EMPTY_SNAPSHOT,
+      addedEntries: [{ id: "added:5", section: "experience", title: "Role" }],
+      relocatedEnds: { "added:added:5": "2022" },
+    } as unknown as EditSnapshot;
+    const base = parse("base-restored");
+    const h = mount({ parseKey: null, hasEdits: false, resume: null });
+    act(() => h.api().adopt(base, "record-from-library", restoredEdit));
+
+    h.update({
+      parseKey: base,
+      hasEdits: true,
+      resume: { ...resumeFor(parse("mid-replay")), baseResult: base, edit: EMPTY_SNAPSHOT },
+    });
+    expect(h.state()).toBe("saved");
+
+    // The replay lands on a hook that mints ids from zero — the SAME content,
+    // under a re-minted entry id and a parking key that follows it.
+    const replayedEdit = {
+      ...EMPTY_SNAPSHOT,
+      addedEntries: [{ id: "added:0", section: "experience", title: "Role" }],
+      relocatedEnds: { "added:added:0": "2022" },
+    } as unknown as EditSnapshot;
+    h.update({
+      resume: { ...resumeFor(parse("post-replay")), baseResult: base, edit: replayedEdit },
+    });
+    expect(h.state()).toBe("saved");
+    await h.flush();
+    await h.flush();
+    expect(h.save).not.toHaveBeenCalled();
+    expect(trackResumeSaved).not.toHaveBeenCalled();
+  });
+
   it("gives up waiting for the replay and still writes, if `resume.edit` never matches", async () => {
     // Nothing guarantees the live snapshot ever reaches the exact shape it
     // was adopted with — e.g. the LLM-recovered branch drops `edit` from

@@ -198,7 +198,11 @@ interface SavedRecord {
  * that names one of those added-entry ids is remapped the same way, since
  * `replay` keys a re-minted entry's bullets by its NEW id
  * (`idMap.get(entryKey) ?? entryKey`); a key naming a PARSED entry
- * (`parsedEntryKey`) is untouched by replay and so is left as-is here.
+ * (`parsedEntryKey`) is untouched by replay and so is left as-is here. A
+ * `relocatedEnds` (#819) key for an added entry embeds the same id
+ * (`addedAnchorKey`, `"added:" + id`) and is folded through the identical
+ * map; a `roleAnchorKey` key for a parsed role is untouched, same as a
+ * parsed `addedBullets` key, because parsed indices never get re-minted.
  */
 function snapshotIdentityKey(snapshot: EditSnapshot): string {
   const addedEntryIds = new Map<string, string>();
@@ -217,11 +221,25 @@ function snapshotIdentityKey(snapshot: EditSnapshot): string {
     ...override,
     id: `#${i}`,
   }));
+  // `relocatedEnds`' added-entry keys (`"added:" + id`, see `addedAnchorKey` in
+  // `useEditableParse.ts`) embed the same re-minted id `addedEntries`/
+  // `addedBullets` above already remap — fold them through the same map so a
+  // parking key naming a re-minted id still compares equal.
+  const relocatedEnds =
+    snapshot.relocatedEnds &&
+    Object.fromEntries(
+      Object.entries(snapshot.relocatedEnds).map(([key, value]) => {
+        const id = key.startsWith("added:") ? key.slice("added:".length) : undefined;
+        const placeholder = id !== undefined ? addedEntryIds.get(id) : undefined;
+        return [placeholder !== undefined ? `added:${placeholder}` : key, value];
+      }),
+    );
   return JSON.stringify({
     ...snapshot,
     addedEntries,
     addedBullets,
     profileOverrides,
+    relocatedEnds,
   });
 }
 
