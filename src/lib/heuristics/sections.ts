@@ -357,19 +357,32 @@ const HEADERLESS_ROLE_CLUSTER_MIN = 2;
  * in the head, "Marathon Running Club, Boston, MA" reads as a master's degree
  * and every Massachusetts / Maryland / Mississippi / Maine role header is
  * rejected out of hand. A real education entry LEADS with its degree, so the
- * anchor costs nothing and closes the whole class. The institution half is
- * NOT anchored, and that half does have a cost: `University` / `College` /
- * `Institute` / `School` / `Academy` / `Polytechnic` are all real EMPLOYERS
- * too, so "Research Engineer, Stanford University (Sep 2018 - Jun 2021)" is
- * rejected as a degree line. A whole headerless cluster of such roles recovers
- * ZERO of them. The trade is deliberate and one-directional: this predicate is
- * the only thing standing between a headerless bucket and a section relabel,
- * it has no header to check itself against, and a degree list read as
- * employment is worse than a school-employed role left where it was — so it
- * fails CLOSED. Anchoring the institution half the way the degree half is
- * anchored (a real education entry leads with its DEGREE, not its school) is a
- * plausible follow-up, but it widens what the rule will relabel and so needs
- * its own repro and corpus measurement rather than riding this guard.
+ * anchor costs nothing and closes the whole class.
+ *
+ * The institution half is ALSO anchored to the lead now (#843 item 5), the
+ * same reasoning applied to the same word order: a real education entry LEADS
+ * with its degree or its school, while an employer name — "Research Engineer,
+ * Stanford University (Sep 2018 - Jun 2021)", "Content Lead, Khan Academy (Jul
+ * 2021 - Present)" — carries the institution AFTER the title, separated by the
+ * first comma. Un-anchored, `University` / `College` / `Institute` / `School` /
+ * `Academy` / `Polytechnic` matched anywhere in the head, so both examples above
+ * read as degree lines and a whole headerless cluster of such roles recovered
+ * ZERO of them. The anchor is the HEAD's leading segment, up to (not including)
+ * the first comma — the same segment a "Title, Company, Location" line would
+ * put its title in — tested with {@link INSTITUTION_HINTS} rather than
+ * requiring index 0, since the hint word can sit anywhere inside a multi-word
+ * institution name ("Ridgemont State University"). An institution-LED line
+ * ("Ridgemont State University, B.S. Computer Science (Aug 2012 - May 2016)")
+ * still rejects, because the hint now sits in its own lead segment.
+ *
+ * The residue this leaves: an institution name split ACROSS the first comma —
+ * "Stanford, University Relations (Sep 2018 - Jun 2021)" — would recover as a
+ * role, same as it did before this anchor (both halves of the trade are
+ * unmeasured without a repro; #843 did not surface one, so it is stated rather
+ * than guessed at). A degree list read as employment is still worse than a
+ * school-employed role left where it was, so the predicate still fails CLOSED
+ * on ambiguity — the anchor only narrows WHERE it looks, not which way the
+ * guard resolves a tie.
  *
  * The residue the anchor leaves is a title that LEADS with one of `DEGREE_RE`'s
  * full words ("Associate Product Manager", "Master Data Engineer"): that line is
@@ -395,7 +408,8 @@ function looksLikeHeaderlessRoleHeader(line: PdfLine): boolean {
   const head = text.slice(0, match.index).trim();
   if (!/^\p{Lu}/u.test(head)) return false;
   if (!isEntryHeaderShape(head)) return false;
-  if (INSTITUTION_HINTS.test(head)) return false;
+  const leadSegment = head.split(",")[0];
+  if (INSTITUTION_HINTS.test(leadSegment)) return false;
   const degree = DEGREE_RE.exec(head);
   return degree === null || degree.index !== 0;
 }
@@ -437,6 +451,21 @@ function looksLikeHeaderlessRoleHeader(line: PdfLine): boolean {
  * pins. Roles 2..N in the same cluster are unaffected: they sit inside the
  * recovered region, where the segmenter's own `headerLookback` already claims
  * their title line.
+ *
+ * Second known residue (PR #1162 review, on #843 item 5): a headerless
+ * EDUCATION line written "Field, Institution (dates)" with no `DEGREE_RE`
+ * abbreviation at all — e.g. "Computer Science, Stanford University (Sep
+ * 2018 - Jun 2021)" — still misreads as a role header, because the
+ * institution hint sits past the first comma, outside the lead segment
+ * {@link looksLikeHeaderlessRoleHeader} tests. Falling back to an
+ * `INSTITUTION_HINTS` test over the FULL head when the lead segment misses
+ * is not a safe fix: it is the exact shape of the #843 item 5 fixture this
+ * function now recovers correctly ("Research Engineer, Stanford University"
+ * has the institution past the comma too), so that fallback would reject a
+ * genuine institution-named EMPLOYER right back out again. No repro pins
+ * this one; the ambiguity is real ("Title, Org" and "Field, Org" are the same
+ * shape without a header or a degree word to arbitrate) and is left open
+ * rather than guessed at with a fix that regresses the case just closed.
  */
 export function recoverHeaderlessExperience(
   sections: PdfSection[],

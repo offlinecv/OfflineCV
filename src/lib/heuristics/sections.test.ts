@@ -1647,6 +1647,36 @@ describe("recoverHeaderlessExperience — opening on entry shape (#492)", () => 
     expect(names(sections)).not.toContain("experience");
   });
 
+  it("does not open on a headerless EDUCATION cluster written institution-first", () => {
+    // Negative control for #843 item 5: an institution-LED line still rejects
+    // because the hint sits in ITS OWN lead segment (before the first comma),
+    // not past it the way an employer's does.
+    const sections = recover([
+      ...CONTACT,
+      { text: "Ridgemont State University, B.S. Computer Science (Aug 2012 - May 2016)", fontSize: 10 },
+      { text: "Lakeside College, M.S. Computer Science (Sep 2016 - May 2018)", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("opens on institution-named employers, anchored to the lead (#843 item 5)", () => {
+    // Pre-#843, INSTITUTION_HINTS tested the whole head, so "University" /
+    // "Academy" past the first comma rejected a genuine employer line the same
+    // way it rejects a degree line — the cluster recovered ZERO roles. Anchored
+    // to the lead segment (before the first comma, where the TITLE sits), the
+    // hint no longer collides with an institution that is itself the employer.
+    const sections = recover([
+      ...CONTACT,
+      { text: "Research Engineer, Stanford University (Sep 2018 - Jun 2021)", fontSize: 10 },
+      { text: "Content Lead, Khan Academy (Jul 2021 - Present)", fontSize: 10 },
+      ROLE_1,
+    ]);
+    expect(names(sections)).toEqual(["profile", "experience"]);
+    const region = sections.find((s) => s.name === "experience")!;
+    expect(region.lines).toHaveLength(3);
+    expect(region.lines[0].text).toContain("Stanford University");
+  });
+
   it("does not open when the router already found an experience section", () => {
     const sections = recover([
       ...CONTACT,

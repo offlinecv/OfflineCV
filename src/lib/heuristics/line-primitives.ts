@@ -358,26 +358,40 @@ function looksLikeUnpunctuatedRunningSentence(text: string): boolean {
  * The residue is one-sided and fails CLOSED — a scope line whose only
  * lowercase words are connectors ("Led the Payments Platform for the Americas")
  * is NOT caught and falls through to the header path, exactly as it did before
- * #708. Widening to reach it would want its own repro, per this module's rule
- * that each widening is pinned by the shape that motivated it.
+ * #708. This is not a narrow, single-example gap: measured against 12
+ * realistic Title-Cased scope lines, about half (6 of 12) have no lowercase
+ * word other than a connector and are missed (#843 item 3) — e.g. "Owned the
+ * Global Risk and Compliance Portfolio", "Managed the EMEA Sales
+ * Organization", "Drove the Cloud Migration across Europe". Widening to reach
+ * them would want its own repro, per this module's rule that each widening is
+ * pinned by the shape that motivated it.
  */
 /** Closed-class connectors that appear INSIDE genuine Title-Cased org and role
  *  names, and so carry no prose evidence. Articles, the two coordinating
- *  conjunctions, and the prepositions English company names actually use.
- *  Deliberately a REJECT list: adding a word here only makes
- *  {@link looksLikeVerbLedScope} more conservative (fewer preempts), which is
- *  the safe direction — a missed scope line lands in `team` as it did before
- *  #708, while a preempted employer line loses `company` outright. */
+ *  conjunctions, the prepositions English company names actually use, and the
+ *  nobiliary/locative particles non-English ones do ("Unified Communications
+ *  de Mexico", "Automated Logic van Nuys") — #843 item 1. Deliberately a
+ *  REJECT list: adding a word here only makes {@link looksLikeVerbLedScope}
+ *  more conservative (fewer preempts), which is the safe direction — a missed
+ *  scope line lands in `team` as it did before #708, while a preempted
+ *  employer line loses `company` outright. */
 const HEADER_CONNECTOR_WORDS = new Set([
   "a", "an", "the", "and", "or", "of", "for", "to", "with",
   "at", "by", "in", "on", "from", "off", "across",
+  "de", "del", "la", "van", "von", "di", "da", "du", "der", "y",
 ]);
 /** A bare all-lowercase word — letters only, apostrophes/hyphens allowed
  *  inside. Excludes mixed-case brand tokens ("eBay", "iRobot"), which lead
  *  lowercase but are names, not prose. */
 const LOWERCASE_WORD_RE = /^\p{Ll}[\p{Ll}\p{M}'’-]*$/u;
 function isLowercaseContentWord(word: string): boolean {
-  const bare = word.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+  // Strip edge punctuation but keep digits (#843 item 2): a letters-only strip
+  // ate the digit off an ordinal ("1st" → "st", "3rd" → "rd"), so "Managed 1st
+  // Choice Health" read "st" as a lowercase content word and the line
+  // preempted out of the header run. Keeping `\p{N}` at the edges leaves "1st"
+  // / "2nd" / "3rd" failing `LOWERCASE_WORD_RE` outright (a leading digit is
+  // not `\p{Ll}`), with no change to any token that was already letters-only.
+  const bare = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
   return LOWERCASE_WORD_RE.test(bare) && !HEADER_CONNECTOR_WORDS.has(bare);
 }
 function looksLikeVerbLedScope(text: string): boolean {
