@@ -1,0 +1,34 @@
+{
+  "id": "transferable-skill",
+  "description": "JD asks for \"stakeholder communication\"; the résumé never uses that phrase but describes \"presenting to execs\" — the semantic point of the feature is recognizing the transferable skill a keyword match would miss entirely.",
+  "jd": "Vantage Health is hiring a Product Manager.\n\nRequirements:\n- Excellent stakeholder communication skills, including with senior leadership\n- Experience prioritizing a product roadmap\n- Comfortable synthesizing customer feedback into requirements",
+  "resume": "Morgan Blake\nmorgan.blake@example.com · (720) 555-0136 · Denver, CO\n\nSummary\nProduct Manager with 4 years of experience owning the roadmap for a B2B SaaS platform, including quarterly roadmap presentations to C-level executives and synthesizing feedback from enterprise customers into prioritized requirements.\n\nExperience\nProduct Manager — Fieldstone Health, 2021–Present\n- Presented quarterly roadmap updates to the executive team and board\n- Prioritized the product backlog based on customer interviews and support data\n- Synthesized feedback from 30+ enterprise customers into a quarterly requirements doc\n\nEducation\nB.S. in Business Administration, University of Colorado Boulder, 2020",
+  "gold": [
+    { "text": "Excellent stakeholder communication, including with senior leadership", "kind": "responsibility", "expectedStatus": "met" },
+    { "text": "Experience prioritizing a product roadmap", "kind": "experience", "expectedStatus": "met" },
+    { "text": "Synthesizing customer feedback into requirements", "kind": "responsibility", "expectedStatus": "met" }
+  ],
+  "canned": {
+    "path": "semantic",
+    "verdicts": [
+      {
+        "requirement": { "id": "req-1", "kind": "responsibility", "text": "Excellent stakeholder communication skills, including with senior leadership" },
+        "status": "met",
+        "reason": "The résumé describes presenting quarterly roadmap updates to the executive team and board, which is stakeholder communication with senior leadership even though the résumé never uses that phrase.",
+        "evidence": "Presented quarterly roadmap updates to the executive team and board"
+      },
+      {
+        "requirement": { "id": "req-2", "kind": "experience", "text": "Experience prioritizing a product roadmap" },
+        "status": "met",
+        "reason": "The résumé states the candidate owns the roadmap and prioritizes the backlog.",
+        "evidence": "Prioritized the product backlog based on customer interviews and support data"
+      },
+      {
+        "requirement": { "id": "req-3", "kind": "responsibility", "text": "Comfortable synthesizing customer feedback into requirements" },
+        "status": "met",
+        "reason": "The résumé describes synthesizing feedback from enterprise customers into a requirements doc.",
+        "evidence": "Synthesized feedback from 30+ enterprise customers into a quarterly requirements doc"
+      }
+    ]
+  }
+}

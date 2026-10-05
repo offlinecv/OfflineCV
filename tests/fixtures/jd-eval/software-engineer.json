@@ -1,0 +1,48 @@
+{
+  "id": "software-engineer",
+  "description": "Regression fixture (#205) — a mainstream tech JD where the semantic path is expected to perform at least as well as the deterministic keyword path. Paired with the keyword path over the same text via `compareSemanticVsKeyword`.",
+  "jd": "Acme Cloud Systems is hiring a Software Engineer to join our platform team.\n\nRequirements:\n- 3+ years of professional experience building backend services in Python\n- Hands-on experience deploying services on AWS (EC2, S3, Lambda)\n- Experience containerizing applications with Docker\n- Familiarity building and maintaining CI/CD pipelines\n- Bachelor's degree in Computer Science or equivalent practical experience\n\nNice to Have:\n- Experience with Kubernetes\n- Exposure to infrastructure as code (Terraform)\n\nAcme Cloud Systems is an equal opportunity employer.",
+  "resume": "Casey Nguyen\ncasey.nguyen@example.com · (415) 555-0171 · San Francisco, CA\n\nSummary\nSenior Software Engineer with 5 years of experience building backend services in Python, deployed on AWS. Built and maintained CI/CD pipelines for a 20-engineer team and containerized every production service with Docker and Kubernetes.\n\nExperience\nSenior Software Engineer — Northbeam Analytics, 2021–Present\n- Built backend services in Python deployed on AWS EC2 and Lambda\n- Designed the team's CI/CD pipeline using GitHub Actions and Docker\n- Migrated production workloads to Kubernetes, cutting deploy time by 40%\n\nSoftware Engineer — Northbeam Analytics, 2019–2021\n- Wrote Python microservices backed by S3 and DynamoDB\n\nEducation\nB.S. in Computer Science, San Francisco State University, 2019",
+  "gold": [
+    { "text": "3+ years of professional experience with Python", "kind": "experience", "expectedStatus": "met" },
+    { "text": "Experience deploying services on AWS", "kind": "skill", "expectedStatus": "met" },
+    { "text": "Experience containerizing applications with Docker", "kind": "skill", "expectedStatus": "met" },
+    { "text": "Experience building and maintaining CI/CD pipelines", "kind": "responsibility", "expectedStatus": "met" },
+    { "text": "Bachelor's degree in Computer Science", "kind": "qualification", "expectedStatus": "met" }
+  ],
+  "canned": {
+    "path": "semantic",
+    "verdicts": [
+      {
+        "requirement": { "id": "req-1", "kind": "experience", "text": "3+ years of professional experience building backend services in Python", "years": 3 },
+        "status": "met",
+        "reason": "The résumé shows 5 years of professional Python backend experience, exceeding the 3-year minimum.",
+        "evidence": "Senior Software Engineer with 5 years of experience building backend services in Python"
+      },
+      {
+        "requirement": { "id": "req-2", "kind": "skill", "text": "Hands-on experience deploying services on AWS" },
+        "status": "met",
+        "reason": "The résumé lists deploying backend services on AWS EC2 and Lambda.",
+        "evidence": "Built backend services in Python deployed on AWS EC2 and Lambda"
+      },
+      {
+        "requirement": { "id": "req-3", "kind": "skill", "text": "Experience containerizing applications with Docker" },
+        "status": "met",
+        "reason": "The résumé states every production service was containerized with Docker.",
+        "evidence": "containerized every production service with Docker and Kubernetes"
+      },
+      {
+        "requirement": { "id": "req-4", "kind": "responsibility", "text": "Familiarity building and maintaining CI/CD pipelines" },
+        "status": "met",
+        "reason": "The résumé describes designing the team's CI/CD pipeline.",
+        "evidence": "Designed the team's CI/CD pipeline using GitHub Actions and Docker"
+      },
+      {
+        "requirement": { "id": "req-5", "kind": "qualification", "text": "Bachelor's degree in Computer Science or equivalent practical experience" },
+        "status": "met",
+        "reason": "The résumé lists a B.S. in Computer Science.",
+        "evidence": "B.S. in Computer Science, San Francisco State University, 2019"
+      }
+    ]
+  }
+}

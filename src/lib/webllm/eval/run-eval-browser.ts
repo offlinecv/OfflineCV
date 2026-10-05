@@ -29,6 +29,15 @@
  * instead of calling `rewriteSectionWithLlm`. That keeps an eval run
  * from polluting `webllm_section_rewrite_*` counters during local
  * benchmarking.
+ *
+ * Since #205 this page also hosts a `jd` mode (the `#mode` select) that
+ * runs the 5 fixtures under `tests/fixtures/jd-eval/` through the REAL
+ * semantic JD-match pipeline (`runLlmMatch`, dynamic-imported — see
+ * `makeRealJdMatchFn` below for why) and scores them with the JD rubric
+ * (`jd-rubric.ts`). It shares this page/model-picker/log rather than a
+ * second HTML entry because the two modes differ only in which fixtures
+ * run and which seam they run through — everything else (model load,
+ * consent, progress log, report download) is identical.
  */
 
 import {
@@ -42,7 +51,9 @@ import {
 import { buildSteeringSuffix } from "../steering.ts";
 import { acquireInference, releaseInference } from "../web-llm.ts";
 import { detectWebGpu } from "../capability.ts";
+import { recordModelConsent } from "../consent.ts";
 import type { WebLlmEngine } from "../types.ts";
+import type { HeuristicParsedResume } from "../../heuristics/types.ts";
 
 import {
   fillEvalModelSelect,
@@ -50,10 +61,14 @@ import {
   loadEvalModel,
 } from "./candidate-models.ts";
 import { REWRITE_FIXTURES } from "./fixtures.ts";
+import { JD_EVAL_FIXTURES } from "./jd-fixtures.ts";
 import { PROMPT_VARIANTS } from "./prompt-variants.ts";
 import { renderJsonReport, renderMarkdownReport } from "./report.ts";
+import { renderJdMarkdownReport } from "./jd-report.ts";
 import { runEval } from "./runner.ts";
+import { runJdEval } from "./jd-runner.ts";
 import type { RawRewriteOutput, RewriteFn } from "./types.ts";
+import type { JdMatchFn } from "./jd-types.ts";
 
 declare const __APP_VERSION__: string;
 
@@ -122,6 +137,42 @@ function makeRealRewriteFn(engine: WebLlmEngine): RewriteFn {
   };
 }
 
+/**
+ * Build a `JdMatchFn` backed by the REAL semantic JD-match pipeline.
+ *
+ * `runLlmMatch` lives under `jd-match/llm/` and is deliberately NOT exported
+ * from the `jd-match` barrel (it transitively imports `web-llm.ts`) — see its
+ * own docblock. Dynamic-importing it here is that same chunk-discipline
+ * pattern every other cascade-tier/WebLLM consumer in the app follows, so
+ * this dev-only harness page costs nothing in the production entry chunk
+ * (which never reaches this file at all).
+ *
+ * A fixture's résumé is plain text, not a parsed `HeuristicParsedResume` —
+ * `runLlmMatch` requires the latter only to build the evidence-judge's
+ * résumé projection and the keyword-fallback corpus, both of which read off
+ * `summary` among other fields, so wrapping the text in `summary` is the
+ * minimal valid shape (see `jd-types.ts`'s docblock).
+ *
+ * `recordModelConsent` stands in for `loadEvalModel`'s own call: `runLlmMatch`
+ * calls `loadEngine` directly rather than through `loadEvalModel`, so nothing
+ * else records the harness-run consent `loadEngine` requires.
+ */
+function makeRealJdMatchFn(): JdMatchFn {
+  return async ({ modelId, fixture }) => {
+    const { runLlmMatch } = await import("../../jd-match/llm/run-llm-match.ts");
+    recordModelConsent(modelId);
+    const parsed: HeuristicParsedResume = {
+      skills: [],
+      experience: [],
+      education: [],
+      summary: fixture.resume,
+    };
+    return runLlmMatch(fixture.jd, parsed, modelId, () => {});
+  };
+}
+
+type EvalMode = "rewrite" | "jd";
+
 interface DomRefs {
   status: HTMLElement;
   progress: HTMLElement;
@@ -130,6 +181,7 @@ interface DomRefs {
   downloadMd: HTMLAnchorElement;
   runBtn: HTMLButtonElement;
   modelSelect: HTMLSelectElement;
+  modeSelect: HTMLSelectElement;
 }
 
 function getDomRefs(): DomRefs {
@@ -141,7 +193,12 @@ function getDomRefs(): DomRefs {
     downloadMd: document.getElementById("download-md") as HTMLAnchorElement,
     runBtn: document.getElementById("run") as HTMLButtonElement,
     modelSelect: document.getElementById("model") as HTMLSelectElement,
+    modeSelect: document.getElementById("mode") as HTMLSelectElement,
   };
+}
+
+function currentMode(refs: DomRefs): EvalMode {
+  return refs.modeSelect.value === "jd" ? "jd" : "rewrite";
 }
 
 function setStatus(refs: DomRefs, text: string): void {
@@ -241,6 +298,64 @@ async function runForModel(refs: DomRefs, modelId: string): Promise<void> {
   }
 }
 
+/**
+ * The `jd` mode (#205): runs the 5 fixtures under `tests/fixtures/jd-eval/`
+ * through the real semantic pipeline and reports agreement against the gold
+ * labels. Unlike `runForModel`, `runLlmMatch` manages its own
+ * acquire/release bracket (see its docblock) and its own engine load, so
+ * this function neither acquires the inference guard nor calls
+ * `loadEvalModel` — `makeRealJdMatchFn` records consent and loads lazily on
+ * first use instead.
+ */
+async function runJdForModel(refs: DomRefs, modelId: string): Promise<void> {
+  const meta = findEvalModel(modelId);
+  const display = meta?.name ?? modelId;
+
+  appendLog(refs, `running jd eval for ${modelId}`);
+  setStatus(
+    refs,
+    `Running ${display} (${JD_EVAL_FIXTURES.length} JD-match fixtures) …`,
+  );
+  refs.progress.textContent = `${display}: loading model …`;
+
+  const report = await runJdEval({
+    modelIds: [modelId],
+    fixtures: JD_EVAL_FIXTURES,
+    matchFn: makeRealJdMatchFn(),
+    appVersion: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : null,
+  });
+
+  for (const record of report.records) {
+    appendLog(
+      refs,
+      `${record.fixtureId}: ${record.path} — gold agreement ${(record.rubric.goldAgreement.agreementRate * 100).toFixed(0)}%` +
+        (record.injectionSafe === null ? "" : `, injection-safe: ${record.injectionSafe}`) +
+        (record.error ? ` (error: ${record.error})` : ""),
+    );
+  }
+  refs.progress.textContent = `${display}: ${report.records.length}/${JD_EVAL_FIXTURES.length} fixtures scored`;
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const slug = modelId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  wireDownload(
+    refs.downloadJson,
+    `eval-jd-${slug}-${stamp}.json`,
+    renderJsonReport(report),
+    "application/json;charset=utf-8",
+  );
+  wireDownload(
+    refs.downloadMd,
+    `eval-jd-${slug}-${stamp}.md`,
+    renderJdMarkdownReport(report),
+    "text/markdown;charset=utf-8",
+  );
+  setStatus(refs, `Done. ${report.records.length} JD fixtures scored for ${display}.`);
+  appendLog(
+    refs,
+    "report ready — download below and commit under tests/fixtures/jd-eval/reports/",
+  );
+}
+
 async function main(): Promise<void> {
   const refs = getDomRefs();
   populateModelPicker(refs);
@@ -248,6 +363,7 @@ async function main(): Promise<void> {
   refs.runBtn.addEventListener("click", async () => {
     refs.runBtn.disabled = true;
     refs.modelSelect.disabled = true;
+    refs.modeSelect.disabled = true;
     refs.downloadJson.setAttribute("hidden", "");
     refs.downloadMd.setAttribute("hidden", "");
     refs.log.textContent = "";
@@ -264,8 +380,13 @@ async function main(): Promise<void> {
         setStatus(refs, `Unknown model: ${modelId}`);
         return;
       }
-      appendLog(refs, `WebGPU available; running ${meta.name}`);
-      await runForModel(refs, modelId);
+      const mode = currentMode(refs);
+      appendLog(refs, `WebGPU available; running ${meta.name} (${mode} mode)`);
+      if (mode === "jd") {
+        await runJdForModel(refs, modelId);
+      } else {
+        await runForModel(refs, modelId);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setStatus(refs, `Failed: ${message}`);
@@ -273,6 +394,7 @@ async function main(): Promise<void> {
     } finally {
       refs.runBtn.disabled = false;
       refs.modelSelect.disabled = false;
+      refs.modeSelect.disabled = false;
     }
   });
 }
