@@ -63,6 +63,13 @@ describe("looksLikeBelowAnchorProse — accepts body prose", () => {
     [
       "Worked on the migration of billing (payments, inventory, invoicing) systems for enterprise clients",
     ],
+    // #843 item 2 regression pin — the reviewer's token battery for the
+    // `\p{N}`-at-the-edges fix (`budget,`, `Inc.`, `P&L,`, `(the`, `24/7`,
+    // `e-commerce`, `O'Brien`): none of these tokens carries a letter at an
+    // edge that digit-preservation could expose, so each classifies exactly
+    // as it did before the fix — this line is prose only because of the
+    // genuine lowercase content words `budget`, `e-commerce`, `rollout`.
+    ["Owned (the P&L, budget and 24/7 e-commerce rollout) for O'Brien Inc."],
   ])("%s", (line) => {
     expect(looksLikeBelowAnchorProse(line)).toBe(true);
   });
@@ -95,6 +102,18 @@ describe("looksLikeBelowAnchorProse — rejects real header lines", () => {
     // Two connectors, so a "≥2 lowercase words" rule would still preempt this
     // one — the content-word rule is what holds it.
     ["Secured Lending of the Midwest"],
+    // Non-English nobiliary/locative particles (#843 item 1): the connector
+    // list was English-only, so these read as a lowercase CONTENT word and the
+    // company line was lost.
+    ["Unified Communications de Mexico"],
+    ["Automated Logic van Nuys"],
+    // An ordinal's digit is not content (#843 item 2): pre-fix, the lowercase
+    // strip kept only letters, so "1st" stripped to "st" and passed as a
+    // lowercase content word. Decision: "Won 3rd Place Hackathon" is NOT
+    // required to read as prose — these pin the boundary, not a widening.
+    ["Managed 1st Choice Health"],
+    ["Won 3rd Place Hackathon"],
+    ["Secured 2nd Place Regional Qualifier"],
     // Ordinary header fields, none verb-led at all.
     ["Staff Platform Engineer"],
     ["Springfield, USA"],

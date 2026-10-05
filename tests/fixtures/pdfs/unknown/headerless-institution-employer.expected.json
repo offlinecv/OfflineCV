@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 6,
+  "cascade": {
+    "confidence": 0.91,
+    "triggers": [],
+    "tiers": [
+      "t0_layout",
+      "t1_openresume"
+    ],
+    "suggestedEscalation": "none",
+    "fieldsPopulated": [
+      "current_company",
+      "current_title",
+      "education",
+      "email",
+      "experience",
+      "family_name",
+      "full_name",
+      "given_name",
+      "location",
+      "phone",
+      "phoneIsValid"
+    ],
+    "skillsCount": 0,
+    "experienceCount": 3,
+    "educationCount": 1,
+    "projectsCount": 0,
+    "achievementsCount": 0,
+    "certificationsCount": 0,
+    "rawTextCharCount": 673,
+    "pageCount": 1,
+    "linkAnnotationCount": 0,
+    "hasMarkdown": true,
+    "sectionSource": "regex"
+  },
+  "score": {
+    "overall": 75,
+    "preLayoutOverall": 75,
+    "specificity": {
+      "score": 27,
+      "max": 40,
+      "gradable": true,
+      "metricBullets": 2,
+      "totalBullets": 5
+    },
+    "structure": {
+      "score": 27,
+      "max": 30,
+      "gradable": true,
+      "goodBullets": 5,
+      "totalBullets": 5
+    },
+    "completeness": {
+      "score": 21,
+      "max": 30,
+      "gradable": true,
+      "missing": [
+        "LinkedIn",
+        "skills",
+        "summary"
+      ]
+    },
+    "layout": {
+      "triggers": [],
+      "multiplier": 1,
+      "scanned": false
+    },
+    "bulletCount": 5,
+    "algoVersion": "1.9"
+  },
+  "reproArtifact": {
+    "artifactVersion": "v1",
+    "cascadeVersion": "v1",
+    "triggers": [],
+    "sectionSource": "regex",
+    "pageCount": 1,
+    "rawCharCount": 661,
+    "extractedCharCount": 479,
+    "sections": [
+      {
+        "name": "profile",
+        "lineCount": 2
+      },
+      {
+        "name": "experience",
+        "lineCount": 8
+      },
+      {
+        "name": "education",
+        "lineCount": 2
+      }
+    ],
+    "parsedCounts": {
+      "hasFullName": true,
+      "hasEmail": true,
+      "hasPhone": true,
+      "hasLocation": true,
+      "hasSummary": false,
+      "experienceCount": 3,
+      "educationCount": 1,
+      "skillsCount": 0
+    },
+    "linkAnnotationCount": 0,
+    "disagreements": []
+  },
+  "derived": {
+    "emailInRawTextButNotParsed": false,
+    "phoneInRawTextButNotParsed": false,
+    "locationInRawTextButNotParsed": false,
+    "skillsHeaderCandidateRejected": false,
+    "educationHeaderCandidateRejected": false,
+    "educationEntriesFewerThanDegreeTokens": false,
+    "experienceRegionHasDateRangeLines": true,
+    "experienceEntriesFewerThanDateRangeLines": false,
+    "achievementsParsedEmpty": true,
+    "achievementsEntriesFewerThanHeaderLines": false,
+    "fullNameChangedAcrossRoundtrip": false,
+    "emailChangedAcrossRoundtrip": false,
+    "phoneChangedAcrossRoundtrip": false,
+    "locationChangedAcrossRoundtrip": false,
+    "linkedinUrlChangedAcrossRoundtrip": false,
+    "experienceChangedAcrossRoundtrip": false,
+    "educationChangedAcrossRoundtrip": false,
+    "skillsChangedAcrossRoundtrip": false,
+    "summaryChangedAcrossRoundtrip": false,
+    "renderThrewOnRoundtrip": false,
+    "textOracleUnavailable": false,
+    "headerOracleUnavailable": false,
+    "roundtripOracleUnavailable": false
+  }
+}
