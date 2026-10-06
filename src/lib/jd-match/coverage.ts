@@ -16,13 +16,30 @@
  *         corpus, word-boundary-aware via the same regex shape as the JD
  *         extractor.
  *       · `noun` source: check the literal phrase (lowercased) against the
- *         corpus, word-boundary-aware.
+ *         corpus, word-boundary-aware. If that literal check misses, retry
+ *         ONCE with the phrase's final token swapped for its counterpart from
+ *         an explicit singular/plural pair table — see `corpusMentionsPhrase`
+ *         (#847).
  *   - Weight: skill = 1.0, noun = 0.5. Score is weighted coverage as a
  *     percentage: `sum(coveredWeights) / sum(totalWeights) * 100`.
  *
  * The score is intentionally a single number — the UI does not show it as
  * "X% match" (see CONTRIBUTING.md / copy discipline). The copy is built
  * around the covered/missing counts; the score is the supporting headline.
+ *
+ * Scoring note (#847): the noun pass used to match a JD phrase's literal
+ * string only, so a résumé saying "distributed systems" reported a JD's
+ * "distributed system" as missing on inflection alone — a false miss, not a
+ * real gap. An earlier version of this fix normalized both sides with a
+ * general stemmer (determiner-dropping, suffix rules); that was withdrawn —
+ * each stemming fix opened a new hole (an all-caps résumé skipped stemming
+ * and reintroduced the same false miss; a bare `endsWith("s")` rule turned
+ * exact singular matches like "bias" and "lens" into false misses). A
+ * single-retry swap against an explicit pair table bridges the same
+ * known-good cases without acting on words nobody named, so `score` can come
+ * out higher than before for a pair-table résumé/JD match. That movement is
+ * the false misses going away, not a re-weighting: `SKILL_WEIGHT`/
+ * `NOUN_WEIGHT` are unchanged.
  */
 
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
@@ -174,10 +191,140 @@ function corpusMentionsSkill(corpus: string, canonicalId: string): boolean {
   return re ? re.test(corpus) : false;
 }
 
-function corpusMentionsPhrase(corpus: string, phrase: string): boolean {
-  const re = new RegExp(
-    `${ALIAS_BOUNDARY_PREFIX}${escapeRegex(phrase.toLowerCase())}${ALIAS_BOUNDARY_SUFFIX}`,
-    "i",
-  );
+/**
+ * Explicit singular ↔ plural pairs for noun-phrase head words that are known
+ * to cost a false "Missing" on inflection alone (#847). Written out, not
+ * derived from a suffix rule: a generic `-s`/`-es` rule is exactly what
+ * reintroduced false misses (an all-caps résumé skipping a stemmer) and false
+ * matches (`endsWith("s")` turning "bias"/"lens" into "bia"/"len") in an
+ * earlier, withdrawn version of this fix. An allowlist can't break what it
+ * doesn't name — a phrase whose head isn't in this table gets no swap, and
+ * behaves exactly as the literal match on `main` did.
+ *
+ * Every entry here comes from one of three sources, named per pair:
+ *   - a head noun the JD extractor demonstrably emits — the comment names
+ *     the JD phrase from `extract-jd-terms.test.ts` it was taken from, so a
+ *     future trim or addition can be checked against the same source
+ *     instead of taken on faith.
+ *   - `team`/`keyword`, seeded by #847's pair table but NOT emitted as a
+ *     noun-term head by any passing extractor case: "engineering team" and
+ *     "The Info Apps team" are prose the title and gerund guards keep out of
+ *     the terms, and "missing keywords" is a comment in the #156 heading
+ *     test. They ride on the issue's table, cited as such, not on corpus
+ *     vocabulary.
+ *   - `bias`/`biases`, which the extractor never emits. It's here because
+ *     `literalPhraseMatches` is boundary-anchored, so a JD `Bias` cannot
+ *     match a résumé that only says `biases`, and #847's acceptance
+ *     criteria requires that it does — a pair observed from an AC, not from
+ *     corpus vocabulary, but the same "add a pair only when a real miss is
+ *     observed" rule still applies.
+ *
+ * `qualification`/`qualifications`, `responsibility`/`responsibilities` and
+ * `demand`/`demands` were seeded from capitalized JD section headings
+ * ("Minimum Qualifications", "Key Responsibilities", "Physical Demands") and
+ * then dropped: `extract-jd-terms.test.ts`'s "drops JD structural section
+ * headings from the noun pass" test asserts the noun pass never emits any of
+ * the three, because `SECTION_HEADING_TAIL_WORDS` strips a phrase whose last
+ * word is `qualifications`/`responsibilities`/`demands` before it ever
+ * reaches coverage. The citation was false and the pairs were unreachable, so
+ * they're gone.
+ *
+ * `coverage.test.ts` pins this exact set against the list #847 seeds.
+ */
+export const PHRASE_HEAD_INFLECTION_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["system", "systems"], // "Distributed System(s)"
+  ["bias", "biases"], // #847 AC: boundary-anchored literal cannot match "biases"
+  ["service", "services"], // "Backend Services"
+  ["function", "functions"], // "Cloud Functions" / "Lambda Functions"
+  ["app", "apps"], // "Info Apps" / "beloved apps"
+  ["team", "teams"], // #847 table; no passing extractor case emits it (see above)
+  ["keyword", "keywords"], // #847 table; no passing extractor case emits it (see above)
+];
+
+/** Bidirectional lookup built from the pair table above — singular maps to
+ *  plural and plural maps to singular, so a swap works whichever direction
+ *  the JD phrase and the résumé wording happen to disagree in (#847). */
+const PHRASE_HEAD_PAIRS: ReadonlyMap<string, string> = (() => {
+  const pairs = new Map<string, string>();
+  for (const [singular, plural] of PHRASE_HEAD_INFLECTION_PAIRS) {
+    pairs.set(singular, plural);
+    pairs.set(plural, singular);
+  }
+  return pairs;
+})();
+
+/**
+ * Swap `phrase`'s final word for its counterpart in `PHRASE_HEAD_PAIRS`, or
+ * return `null` if the final word isn't in the table. Only the last word
+ * (the phrase's head noun) is ever swapped — never a middle word — so this
+ * cannot merge two phrases that differ anywhere but their final word.
+ *
+ * "Word" is a whitespace-delimited token, the same unit `extractNounPass`
+ * builds phrases from (its word class admits `&` and `-`), so a head like
+ * `R&D` or `sub-systems` is looked up whole and, absent from the table, gets
+ * no swap — never a swap of its trailing alphanumeric fragment.
+ *
+ * Uses the same `lastIndexOf(" ")` idiom `extract-jd-terms.ts` already relies
+ * on (`isSectionHeading`, `isGerundVerbUsage`), not a `/^(.*?)(\S+)$/` regex:
+ * that regex returns `null` for a phrase ending in whitespace, which would
+ * silently skip the retry. `lastIndexOf` never does — a phrase with no space
+ * yields index `-1`, so the whole phrase is `lastWord` and the prefix is `""`.
+ */
+function swapFinalTokenInflection(phrase: string): string | null {
+  const lastSpace = phrase.lastIndexOf(" ");
+  const lastWord = phrase.slice(lastSpace + 1);
+  const swapped = PHRASE_HEAD_PAIRS.get(lastWord.toLowerCase());
+  return swapped === undefined ? null : `${phrase.slice(0, lastSpace + 1)}${swapped}`;
+}
+
+/** Compiled boundary patterns keyed by lowercased phrase. `rank.ts` runs
+ *  coverage once per posting and the swap retry adds a second compile on
+ *  every literal miss, so without this the same JD phrases are recompiled
+ *  posting after posting. A single posting's vocabulary is bounded by
+ *  `NOUN_PASS_CAP`, but this map's lifetime is the module's, not one
+ *  posting's — a long session calls `literalPhraseMatches` once per posting
+ *  with no cap of its own, so `PHRASE_PATTERN_CACHE_MAX` below enforces one
+ *  directly instead of leaving the map to grow for the life of the session.
+ *  No `g` flag, so a shared pattern carries no `lastIndex` state between
+ *  calls. */
+const phrasePatternCache = new Map<string, RegExp>();
+
+/** Hard cap on `phrasePatternCache`'s size. When a miss would grow the cache
+ *  past this many entries, the cache is cleared first — losing the recompile
+ *  savings for one posting is cheap; an unbounded map across a long session
+ *  is not. */
+const PHRASE_PATTERN_CACHE_MAX = 500;
+
+/** Literal, word-boundary-aware phrase match — the same check `main` has
+ *  always used for the noun pass. */
+function literalPhraseMatches(corpus: string, phrase: string): boolean {
+  const key = phrase.toLowerCase();
+  let re = phrasePatternCache.get(key);
+  if (re === undefined) {
+    if (phrasePatternCache.size >= PHRASE_PATTERN_CACHE_MAX) {
+      phrasePatternCache.clear();
+    }
+    re = new RegExp(
+      `${ALIAS_BOUNDARY_PREFIX}${escapeRegex(key)}${ALIAS_BOUNDARY_SUFFIX}`,
+      "i",
+    );
+    phrasePatternCache.set(key, re);
+  }
   return re.test(corpus);
+}
+
+/**
+ * A noun-pass phrase is "covered" when it appears in the corpus literally,
+ * OR — only when the literal check misses — when it appears after swapping
+ * its final word for the counterpart `PHRASE_HEAD_PAIRS` names (#847). This
+ * credits a résumé's "distributed systems" for a JD's "distributed system",
+ * and the reverse, without touching any word the table doesn't name: "on-call
+ * rotation" still misses against a résumé that only says "production support
+ * rotation" — the earlier words differ and no swap bridges that, nor is it
+ * meant to (#156 is the semantic path for genuinely different wording).
+ */
+function corpusMentionsPhrase(corpus: string, phrase: string): boolean {
+  if (literalPhraseMatches(corpus, phrase)) return true;
+  const swapped = swapFinalTokenInflection(phrase);
+  return swapped !== null && literalPhraseMatches(corpus, swapped);
 }
