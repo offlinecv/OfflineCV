@@ -87,6 +87,17 @@
       open a new tab for the next one.
     </p>
     <p>
+      Since #205, the <strong>JD match</strong> mode below runs the 5
+      fixtures under <code>tests/fixtures/jd-eval/</code> through the real
+      semantic JD-match pipeline instead, and reports gold-label agreement.
+    </p>
+    <p>
+      <label for="mode">Eval:&nbsp;</label>
+      <select id="mode">
+        <option value="rewrite">Rewrite quality (#65)</option>
+        <option value="jd">JD match (#205)</option>
+      </select>
+      &nbsp;
       <label for="model">Model:&nbsp;</label>
       <select id="model"></select>
       &nbsp;
@@ -101,9 +112,10 @@
     <pre id="log"></pre>
     <p class="note">
       The downloaded report goes under
-      <code>tests/fixtures/rewrite/reports/</code> when you commit a fresh
-      run. See <code>src/lib/webllm/eval/README.md</code> for the
-      report-commit workflow.
+      <code>tests/fixtures/rewrite/reports/</code> (rewrite mode) or
+      <code>tests/fixtures/jd-eval/reports/</code> (JD match mode) when you
+      commit a fresh run. See <code>src/lib/webllm/eval/README.md</code> for
+      the report-commit workflow.
     </p>
     <script type="module" src="/src/lib/webllm/eval/run-eval-browser.ts"></script>
   </body>

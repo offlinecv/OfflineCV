@@ -10,7 +10,7 @@
  * corpus while the rule was written down in three separate places.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   checkFixture,
+  checkJdEvalFixture,
   extractPdf,
   findPhoneCandidates,
   flattenInfoValues,
@@ -427,6 +428,39 @@ describe("flattenOutline", () => {
 
   it("tolerates a PDF with no outline at all", () => {
     expect(flattenOutline(null)).toEqual([]);
+  });
+});
+
+describe("checkJdEvalFixture (#205)", () => {
+  it("passes a fully synthetic JD/résumé pair", () => {
+    const clean =
+      '{"resume":"Jane Smith\\n(312) 555-0123 \\u00b7 jane.smith@example.com"}';
+    expect(checkJdEvalFixture(clean)).toEqual([]);
+  });
+
+  it("fails a fixture whose embedded résumé phone is invalid", () => {
+    const bad = '{"resume":"(555) 018-2390 \\u00b7 jane.smith@example.com"}';
+    expect(checkJdEvalFixture(bad).join("\n")).toContain("(555) 018-2390");
+  });
+
+  it("fails a fixture whose only email is not @example.com", () => {
+    const bad = '{"resume":"(312) 555-0123 \\u00b7 jane@acme.io"}';
+    expect(checkJdEvalFixture(bad).join("\n")).toContain("jane@acme.io");
+  });
+
+  it("fails a denylisted real persona from an OSS template's demo résumé", () => {
+    const bad = '{"resume":"jane.smith@example.com posquit0"}';
+    expect(checkJdEvalFixture(bad).join("\n")).toContain("posquit0");
+  });
+
+  it("every committed tests/fixtures/jd-eval/*.json fixture is synthetic", () => {
+    const dir = new URL("../tests/fixtures/jd-eval/", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const text = readFileSync(new URL(file, dir), "utf8");
+      expect(checkJdEvalFixture(text), file).toEqual([]);
+    }
   });
 });
 

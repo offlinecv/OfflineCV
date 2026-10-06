@@ -15,13 +15,22 @@ src/lib/webllm/eval/
 ├── rubric.ts             # the seven deterministic criteria
 ├── prompt-variants.ts    # the shipped prompt + experimental variants
 ├── runner.ts             # iterates (model × variant × fixture)
-├── report.ts             # JSON + Markdown formatters
+├── report.ts             # JSON + Markdown formatters (renderJsonReport is shared)
 ├── candidate-models.ts   # dev-only model list for every harness dropdown
-└── run-eval-browser.ts   # browser entry — wires real WebLLM engine
+├── run-eval-browser.ts   # browser entry — wires real WebLLM engine, both modes
+│
+│   # JD-match eval (#205) — a sibling seam, not a generalization of the above:
+├── jd-types.ts           # JdEvalFixture, JdMatchFn — the JD-match seam types
+├── jd-fixtures.ts        # loads + validates the 5 tests/fixtures/jd-eval/*.json
+├── jd-rubric.ts          # the deterministic JD-match checks + gold agreement
+├── jd-runner.ts          # iterates (model × fixture) over JdMatchFn
+└── jd-report.ts          # JD Markdown formatter (reuses report.ts's JSON one)
 ```
 
-Fixtures live under `tests/fixtures/rewrite/`; reports get committed to
-`tests/fixtures/rewrite/reports/`.
+Rewrite fixtures live under `tests/fixtures/rewrite/`; reports get committed
+to `tests/fixtures/rewrite/reports/`. JD-match fixtures live under
+`tests/fixtures/jd-eval/`; their reports get committed to
+`tests/fixtures/jd-eval/reports/`.
 
 ## Two execution legs
 
@@ -67,6 +76,106 @@ collision. Reports are append-only — never overwrite a prior run.
 
 `eval-rewrite.html` is NOT included in `build.rollupOptions.input`, so
 the production bundle is unaffected.
+
+## JD-match mode (#205)
+
+The same `eval-rewrite.html` page hosts a second mode — the `Eval` dropdown
+next to the model picker — that measures the WebLLM-native JD-matching path
+(`src/lib/jd-match/llm/`) instead of rewrite quality. It shares the page, the
+model picker, the progress log, and the download buttons; it differs only in
+which fixtures run and which seam they run through:
+
+```sh
+npm run eval:rewrite
+# opens https://localhost:5173/eval-rewrite.html — pick "JD match (#205)"
+```
+
+### Two execution legs, same split as rewrite
+
+- **Scoring leg (CI)** — `jd-rubric.ts` + `jd-runner.ts` + `jd-report.ts`,
+  unit-tested under `*.test.ts` siblings, no model, no WebGPU. The Node tests
+  pass a **canned-output stub** `JdMatchFn` that returns each fixture's own
+  `canned` field in place of a real model call — the stub leg scores canned
+  outputs against the rubric and fixtures, and does **not** claim anything
+  about real-model quality.
+- **Inference leg (local, WebGPU)** — the `jd` mode above, which
+  dynamic-imports `runLlmMatch` and runs the 5 fixtures under
+  `tests/fixtures/jd-eval/` through the real shipped model. A committed
+  real-Gemma report is a tracked follow-up, not part of #205.
+
+### The rubric
+
+`jd-rubric.ts`'s `scoreJdRubric` is model-free, like the rewrite rubric:
+
+1. **JSON well-formed** — scoped to "extraction did not hard-fail"
+   (`result.path === "semantic"`) rather than a plumbed-through
+   `parse_repaired` flag; see the function's docblock for why.
+2. **No invented requirements** — every verdict's requirement has non-empty
+   text, no two verdicts share one (normalized), and none verbatim-copies a
+   JD section heading.
+3. **Status shape** — every verdict's status is `met` / `partial` / `missing`.
+4. **Reasons sane** — every verdict's reason is non-empty and length-sane.
+5. **Evidence groundedness** — when a verdict carries `evidence`, it must be
+   a substring of the fixture's résumé text.
+6. **Gold agreement** — `scoreGoldAgreement` fuzzy-joins each fixture's
+   hand-labeled gold set to the model's requirements (same `kind`, token-set
+   Jaccard over the text) and reports the expected-vs-actual status
+   agreement rate. **Reported only — no CI threshold gate.** A real model's
+   agreement is expected to vary run to run; gating on it would measure luck.
+
+Two more checks are fixture-specific, both defined explicitly per #205 rather
+than left to a generic rubric field:
+
+- **`compareSemanticVsKeyword`** — for the `software-engineer` fixture (a
+  mainstream tech JD where semantic is expected to do at least as well as
+  keyword matching), runs the deterministic keyword path
+  (`extractJdTerms` + `computeCoverageFromCorpus`) over the SAME fixture text
+  and reports both the semantic gold-agreement rate and the keyword coverage
+  rate side by side. Reported, not gated — the stub leg only asserts the
+  comparison computes a value for both arms.
+- **`checkNoInjectionLeak`** — for the `prompt-injection` fixture (a JD
+  carrying a known injected instruction), asserts no extracted requirement's
+  text and no verdict's reason echoes the payload, and that the requirement
+  count isn't degenerate (zero, or a single requirement that is itself the
+  payload).
+
+### Adding a JD-eval fixture
+
+Drop a JSON file under `tests/fixtures/jd-eval/` with this shape:
+
+```json
+{
+  "id": "kebab-case-id",
+  "description": "What this fixture stresses, for the report's prose.",
+  "jd": "The job description, as a user would paste it.",
+  "resume": "The résumé text, as a parse's reconstructed text would read.",
+  "postingTitle": "Optional — exercises the noun-pass title exclusion.",
+  "gold": [{ "text": "...", "kind": "skill", "expectedStatus": "met" }],
+  "canned": {
+    "path": "semantic",
+    "verdicts": [
+      {
+        "requirement": { "id": "req-1", "kind": "skill", "text": "..." },
+        "status": "met",
+        "reason": "...",
+        "evidence": "optional verbatim résumé substring"
+      }
+    ]
+  },
+  "injectionPayload": "only on a prompt-injection probe fixture"
+}
+```
+
+Then append an `import` + entry in `jd-fixtures.ts::JD_EVAL_FIXTURES`. Same
+explicit-list discipline as the rewrite fixtures — no `import.meta.glob`.
+`canned.summary` is NOT authored; `parseJdFixture` derives it from
+`canned.verdicts` so a fixture can never drift from its own verdict list.
+
+**PII policy still applies, and is machine-checked.** `npm run check:fixtures`
+(`scripts/check-fixture-pii.mjs`) sweeps every `tests/fixtures/jd-eval/*.json`
+file for the email-domain and phone-shape rules — see
+`CLAUDE.md`/`checkJdEvalFixture` for the exact policy (`@example.com`, a real
+area code + `555` exchange + `0100`–`0199` subscriber).
 
 ## Reading the report
 

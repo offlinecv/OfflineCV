@@ -17,7 +17,9 @@
  * system binary.
  *
  * Since #654 it ALSO sweeps the ground-truth sidecars (`*.truth.json`) — see
- * `checkTruthSidecar` for why that surface needs a machine behind it.
+ * `checkTruthSidecar` for why that surface needs a machine behind it. Since
+ * #205 it ALSO sweeps the JD-match eval harness's inline fixtures
+ * (`tests/fixtures/jd-eval/*.json`) — see `checkJdEvalFixture`, same reasoning.
  *
  * The gate's one VERIFIED advantage over eyeballing `pdftotext` is that
  * `pdftotext` cannot see a LINK ANNOTATION at all (hazard 3 below): at HEAD,
@@ -71,6 +73,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, relative, sep } from "node:path";
 
 const FIXTURE_ROOT = "tests/fixtures/pdfs";
+
+/** The JD-match eval harness's inline PII-safe fixtures (#205) — JSON, not
+ *  PDF, so they need their own walk + sweep (see `checkJdEvalFixture`). */
+const JD_EVAL_ROOT = "tests/fixtures/jd-eval";
 
 /** The one email domain a fixture persona may use (RFC 2606, reserved). */
 const ALLOWED_EMAIL_DOMAIN = "example.com";
@@ -694,6 +700,37 @@ function walkTruthSidecars(dir) {
   return found;
 }
 
+/**
+ * The JD-match eval harness's inline fixtures (#205) — `tests/fixtures/jd-eval/*.json`,
+ * each carrying a synthetic JD + résumé pair as plain text. Same reasoning as the
+ * ground-truth sidecars above: this is a place a fixture author types résumé-shaped
+ * contact details directly into committed JSON, and every other check here only ever
+ * reads a PDF, so this surface would otherwise ship unchecked. Scans the WHOLE file
+ * as one string, same as `checkTruthSidecar` — `canned.verdicts[].evidence` is as much
+ * a scannable surface as `jd`/`resume`, and splitting them apart buys nothing.
+ */
+export function checkJdEvalFixture(text) {
+  // No `noText` exception here, unlike `checkTruthSidecar`: this surface is
+  // always author-typed JSON, never a legitimately textless scanned PDF, so a
+  // fixture with no contact info at all should fail rather than pass silently.
+  const context = { exception: {}, excepted: () => false };
+  return [
+    ...checkEmailRule(text, context),
+    ...checkPhoneRule(text, context),
+    ...checkPersonaRule(text),
+  ];
+}
+
+function walkJdEvalFixtures(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) found.push(...walkJdEvalFixtures(path));
+    else if (entry.endsWith(".json")) found.push(path);
+  }
+  return found;
+}
+
 /** Run every rule over every PDF; returns only the fixtures that failed. */
 async function scanPdfs(pdfs) {
   const failed = [];
@@ -735,15 +772,23 @@ async function main() {
     if (failures.length > 0) failed.push({ relPath, failures });
   }
 
+  const jdEvalFixtures = walkJdEvalFixtures(JD_EVAL_ROOT);
+  for (const absPath of jdEvalFixtures) {
+    const relPath = `jd-eval/${relative(JD_EVAL_ROOT, absPath).split(sep).join("/")}`;
+    const failures = checkJdEvalFixture(readFileSync(absPath, "utf8"));
+    if (failures.length > 0) failed.push({ relPath, failures });
+  }
+
   if (failed.length === 0) {
     console.log(
-      `✓ fixture PII: ${pdfs.length} PDFs and ${truthFiles.length} ground-truth ` +
-        `sidecars under ${FIXTURE_ROOT}/ — all personas synthetic.`,
+      `✓ fixture PII: ${pdfs.length} PDFs, ${truthFiles.length} ground-truth ` +
+        `sidecars under ${FIXTURE_ROOT}/, and ${jdEvalFixtures.length} JD-eval ` +
+        `fixtures under ${JD_EVAL_ROOT}/ — all personas synthetic.`,
     );
     return;
   }
 
-  reportFailures(failed, pdfs.length + truthFiles.length);
+  reportFailures(failed, pdfs.length + truthFiles.length + jdEvalFixtures.length);
   process.exitCode = 1;
 }
 

@@ -1,0 +1,41 @@
+{
+  "id": "music-intern",
+  "description": "Non-tech JD (#156) — a performing-arts internship with no software requirements, probing that the semantic path doesn't force a tech-shaped extraction onto a JD that has none.",
+  "jd": "Chicago Symphony Youth Ensemble is hiring a Summer Music Intern to support our summer concert series.\n\nResponsibilities:\n- Assist with rehearsal logistics and stage setup for weekly concerts\n- Coordinate sheet music distribution among ensemble members\n- Support front-of-house volunteers during performances\n\nMinimum Qualifications:\n- Currently pursuing a degree in Music Performance or a related field\n- Prior experience performing in an ensemble (orchestra, band, or choir)\n- Comfortable using basic audio recording or editing software\n- Strong written and verbal communication skills\n\nWhat We Offer:\n- A stipend and free tickets to our summer concert series\n\nChicago Symphony Youth Ensemble is an Equal Opportunity Employer.",
+  "resume": "Jordan Rivera\njordan.rivera@example.com · (312) 555-0142 · Chicago, IL\n\nSummary\nThird-year Music Performance student at DePaul University with four years of experience performing violin in the DePaul Symphony Orchestra and the Chicago Youth Orchestra. Comfortable editing rehearsal recordings in Audacity. Organized sheet music logistics for a 60-member ensemble during the 2025 spring tour.\n\nExperience\nSection Violinist — DePaul Symphony Orchestra, 2022–Present\n- Performed in twelve subscription concerts per season\n- Organized and distributed sheet music for new repertoire each semester\n\nVolunteer Coordinator — Chicago Youth Orchestra Summer Festival, 2024\n- Managed front-of-house volunteers for six evening performances\n- Edited and uploaded rehearsal recordings for section review\n\nEducation\nB.M. in Music Performance, DePaul University, Expected 2026",
+  "postingTitle": "Summer Music Intern",
+  "gold": [
+    { "text": "Pursuing a degree in Music Performance", "kind": "qualification", "expectedStatus": "met" },
+    { "text": "Prior experience performing in an ensemble", "kind": "experience", "expectedStatus": "met" },
+    { "text": "Comfortable using audio editing software", "kind": "skill", "expectedStatus": "met" },
+    { "text": "Strong written and verbal communication skills", "kind": "responsibility", "expectedStatus": "met" }
+  ],
+  "canned": {
+    "path": "semantic",
+    "verdicts": [
+      {
+        "requirement": { "id": "req-1", "kind": "qualification", "text": "Pursuing a degree in Music Performance or a related field" },
+        "status": "met",
+        "reason": "The résumé states the candidate is a third-year Music Performance student at DePaul University.",
+        "evidence": "Third-year Music Performance student at DePaul University"
+      },
+      {
+        "requirement": { "id": "req-2", "kind": "experience", "text": "Prior experience performing in an ensemble" },
+        "status": "met",
+        "reason": "The résumé lists four years performing violin in two named ensembles.",
+        "evidence": "four years of experience performing violin in the DePaul Symphony Orchestra and the Chicago Youth Orchestra"
+      },
+      {
+        "requirement": { "id": "req-3", "kind": "skill", "text": "Comfortable using basic audio recording or editing software" },
+        "status": "met",
+        "reason": "The résumé states the candidate edits rehearsal recordings in Audacity.",
+        "evidence": "Comfortable editing rehearsal recordings in Audacity"
+      },
+      {
+        "requirement": { "id": "req-4", "kind": "responsibility", "text": "Strong written and verbal communication skills" },
+        "status": "partial",
+        "reason": "The résumé shows coordination and volunteer-management experience but never explicitly describes written or verbal communication skills."
+      }
+    ]
+  }
+}

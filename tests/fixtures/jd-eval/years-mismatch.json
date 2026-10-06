@@ -1,0 +1,34 @@
+{
+  "id": "years-mismatch",
+  "description": "JD asks for 5+ years of React; the résumé shows 2. Expects a `partial` verdict rather than `met` or `missing` — the résumé genuinely has the skill, just not the tenure the posting asks for.",
+  "jd": "Lumen Retail is hiring a Frontend Engineer.\n\nRequirements:\n- 5+ years of professional experience with React\n- Experience with TypeScript\n- Comfortable working directly with designers on UI polish",
+  "resume": "Priya Shah\npriya.shah@example.com · (646) 555-0118 · New York, NY\n\nSummary\nFrontend Engineer with 2 years of professional experience building React applications in TypeScript, partnering closely with the design team on UI polish.\n\nExperience\nFrontend Engineer — Hatch Commerce, 2023–Present\n- Built and maintained React + TypeScript storefront components\n- Paired weekly with product designers to refine UI details\n\nEducation\nB.A. in Informatics, CUNY Hunter College, 2023",
+  "gold": [
+    { "text": "5+ years of professional React experience", "kind": "experience", "expectedStatus": "partial" },
+    { "text": "Experience with TypeScript", "kind": "skill", "expectedStatus": "met" },
+    { "text": "Comfortable working directly with designers on UI polish", "kind": "responsibility", "expectedStatus": "met" }
+  ],
+  "canned": {
+    "path": "semantic",
+    "verdicts": [
+      {
+        "requirement": { "id": "req-1", "kind": "experience", "text": "5+ years of professional experience with React", "years": 5 },
+        "status": "partial",
+        "reason": "The résumé shows 2 years of professional React experience, short of the 5+ years the posting requires.",
+        "evidence": "2 years of professional experience building React applications"
+      },
+      {
+        "requirement": { "id": "req-2", "kind": "skill", "text": "Experience with TypeScript" },
+        "status": "met",
+        "reason": "The résumé states the candidate's React applications are built in TypeScript.",
+        "evidence": "React applications in TypeScript"
+      },
+      {
+        "requirement": { "id": "req-3", "kind": "responsibility", "text": "Comfortable working directly with designers on UI polish" },
+        "status": "met",
+        "reason": "The résumé describes pairing weekly with product designers to refine UI details.",
+        "evidence": "Paired weekly with product designers to refine UI details"
+      }
+    ]
+  }
+}

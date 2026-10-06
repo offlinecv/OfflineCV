@@ -17,9 +17,16 @@ import type { EvalReport, RunRecord } from "./types.ts";
  * formatting against drift. Reports are intentionally lossy on
  * model-output text (per-bullet text is included but per-cell raw
  * responses are not) so the artifact stays under a kilobyte per cell.
+ *
+ * `renderJsonReport` is generic (#205): `JSON.stringify` never cared about
+ * the rewrite-specific `EvalReport` shape, so the JD-match eval harness
+ * (`jd-report.ts`) reuses this one function for its own `JdEvalReport`
+ * rather than forking a byte-identical JSON formatter. `renderMarkdownReport`
+ * stays `EvalReport`-specific — its table columns are the rewrite rubric's,
+ * and the JD harness's `renderJdMarkdownReport` has its own.
  */
 
-export function renderJsonReport(report: EvalReport): string {
+export function renderJsonReport<T>(report: T): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
@@ -83,7 +90,10 @@ export function renderMarkdownReport(report: EvalReport): string {
   return `${lines.join("\n")}\n`;
 }
 
-function pct(v: number): string {
+/** Shared Markdown-table cell formatters (#205): `jd-report.ts` imports these
+ *  three rather than forking its own copies — a rate/boolean cell renders the
+ *  same way regardless of which rubric produced it. */
+export function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
 }
 
@@ -93,6 +103,14 @@ function pctOrDash(v: number | null): string {
 
 function numOrDash(v: number | null): string {
   return v === null ? "—" : v.toFixed(2);
+}
+
+export function tick(v: boolean): string {
+  return v ? "PASS" : "fail";
+}
+
+export function tickOrDash(v: boolean | null): string {
+  return v === null ? "—" : tick(v);
 }
 
 /**
@@ -109,12 +127,4 @@ function revertCell(r: RunRecord): string {
   return r.revertedNumbers.length === 0
     ? `REVERTED${reason}`
     : `REVERTED${reason}: ${r.revertedNumbers.join(", ")}`;
-}
-
-function tick(v: boolean): string {
-  return v ? "PASS" : "fail";
-}
-
-function tickOrDash(v: boolean | null): string {
-  return v === null ? "—" : tick(v);
 }
