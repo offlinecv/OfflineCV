@@ -40,9 +40,9 @@
   ],
   "knownWrong": {
     "location": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "The address loses its street number and its ZIP: “4567 Main Street City, ST 98052” comes back as “Main Street City, ST”."
+      "issue": 837,
+      "status": "accepted",
+      "note": "location is a locality, not a mailing address (#837): the parser now returns “City, ST” for this address line, correctly dropping the street number/name and ZIP — but that will never literally match this truth value, which (per this file's provenance) records the full line as drawn, “4567 Main Street City, ST 98052”. The disagreement is structural, not a parser miss."
     }
   }
 }
