@@ -47,6 +47,25 @@ about steering adherence.
 **They are not evidence about half 2, in either direction.** Their absence
 of a Steering column is an artifact of when they were run, not a finding.
 
+## The 2026-06-23 and 2026-08-07 reports predate the No-markdown column (#805)
+
+Same situation as the Steering note above, one column later. Every report
+committed through **2026-08-07** carries these columns after `Model` and
+`Variant`: `Numbers | Reverted | One-line | Verb | Length | No-preamble |
+Dedup | Steering | Judge | Aggregate` (the 2026-06-23 trio predates
+`Reverted` and `Steering` too — see above). The **No-markdown** column and
+the `noResidualMarkdown` rubric criterion arrived later, with #805, so none
+of these runs measured whether a rewrite shipped literal `**` to the user.
+
+**Their absence of a No-markdown column is an artifact of when they were
+run, not a finding — they are not evidence about residual markdown, in
+either direction.** This is true even of the **19 of 24** Gemma `terse`
+bullets the "third anomaly" section below quotes from the 2026-08-07 files:
+that count was found by a human reading `perBullet[].text` by hand, not by
+any column in these reports, and it is exactly the class #805 added the
+criterion to surface on a future run without a human having to read every
+cell.
+
 ## #608 half 2 — steering adherence, answered on the whole registry
 
 The **2026-08-07** reports are the first carrying a real Steering column,

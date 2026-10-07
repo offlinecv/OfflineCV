@@ -194,6 +194,10 @@ function aggregateRecords(
       const actionVerbRate = rate(scored, (r) => r.rubric.actionVerbLead);
       const lengthSanityRate = rate(scored, (r) => r.rubric.lengthSanity);
       const noPreambleLeakRate = rate(scored, (r) => r.rubric.noPreambleLeak);
+      const noResidualMarkdownRate = rate(
+        scored,
+        (r) => r.rubric.noResidualMarkdown,
+      );
 
       const redundantCell = scored.filter((r) => r.fixtureKind === "redundant");
       const dedupEffectiveRate =
@@ -228,6 +232,7 @@ function aggregateRecords(
         actionVerbRate,
         lengthSanityRate,
         noPreambleLeakRate,
+        noResidualMarkdownRate,
         ...(dedupEffectiveRate === null ? [] : [dedupEffectiveRate]),
         ...(steeringAdherenceRate === null ? [] : [steeringAdherenceRate]),
       ];
@@ -244,6 +249,7 @@ function aggregateRecords(
         actionVerbRate,
         lengthSanityRate,
         noPreambleLeakRate,
+        noResidualMarkdownRate,
         dedupEffectiveRate,
         steeringAdherenceRate,
         judgeMean,

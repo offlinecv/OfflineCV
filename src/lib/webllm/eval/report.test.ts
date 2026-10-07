@@ -20,6 +20,7 @@ function passingRecord(modelId: string, variantId: string, fixtureId: string): R
       actionVerbLead: true,
       lengthSanity: true,
       noPreambleLeak: true,
+      noResidualMarkdown: true,
       dedupEffective: null,
   steeringAdherence: null,
       judgeCoherence: null,
@@ -56,6 +57,7 @@ const sampleReport: EvalReport = {
       actionVerbRate: 1,
       lengthSanityRate: 1,
       noPreambleLeakRate: 1,
+      noResidualMarkdownRate: 1,
       dedupEffectiveRate: null,
   steeringAdherenceRate: null,
       judgeMean: null,
@@ -94,6 +96,39 @@ describe("renderMarkdownReport", () => {
     const md = renderMarkdownReport(sampleReport);
     // The aggregate row's dedup + judge columns should render `—`.
     expect(md).toMatch(/\| — \| — \| \*\*100%\*\* \|/);
+  });
+
+  it("renders a No-markdown column in both tables (#805)", () => {
+    const md = renderMarkdownReport(sampleReport);
+    expect(md).toContain(
+      "| Model | Variant | Numbers | Reverted | One-line | Verb | Length | No-preamble | No-markdown | Dedup | Steering | Judge | **Aggregate** |",
+    );
+    expect(md).toContain(
+      "| Fixture | Kind | In → Out | Numbers | Reverted | Verb | Length | Preamble | Markdown | Dedup | Steering | Error |",
+    );
+    // The aggregate rate is a percentage, not the em dash the nullable
+    // columns on either side of it render.
+    expect(md).toContain(
+      "| 100% | 0% | 100% | 100% | 100% | 100% | 100% | — | — | — | **100%** |",
+    );
+  });
+
+  it("renders fail in the per-cell Markdown column when the rubric caught residual markdown", () => {
+    const flagged: EvalReport = {
+      ...sampleReport,
+      records: [
+        {
+          ...passingRecord("Qwen2.5-1.5B-Instruct-q4f16_1-MLC", "baseline", "fx-weak"),
+          rubric: {
+            ...passingRecord("M", "V", "F").rubric,
+            noResidualMarkdown: false,
+          },
+        },
+      ],
+    };
+    const md = renderMarkdownReport(flagged);
+    expect(md).toContain("| Preamble | Markdown | Dedup |");
+    expect(md).toContain("| PASS | fail | — |");
   });
 
   it("renders the Reverted column with the tokens the gate refused to lose (#778)", () => {

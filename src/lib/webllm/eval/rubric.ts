@@ -26,6 +26,10 @@ import { startsWithActionVerb } from "./verbs.ts";
  *   6. dedupEffective     — for `redundant` fixtures only: output < input
  *   7. steeringAdherence  — for steering fixtures only (#608): did the output
  *                           obey the instruction it was steered with?
+ *   8. noResidualMarkdown — no output bullet carries a paired `**…**` bold
+ *                           span (#805): the class #781 found by hand, where
+ *                           `cleanRewriteLine` left literal asterisks in text
+ *                           that scored PASS on every other criterion.
  *
  * Each criterion is computed independently — one failing does NOT
  * short-circuit the others, because the report's per-criterion pass rate
@@ -61,6 +65,21 @@ const PREAMBLE_LEAK_PHRASES = [
 ];
 
 /**
+ * A residual bold span: two `**` markers enclosing content. This is
+ * deliberately the ONLY markdown shape flagged (#805 decision 1) — `*`,
+ * `_`, backticks, `#`, a lone `**`, and unpaired asterisks are legitimate
+ * résumé content (`C*`, `snake_case`, `#1`, `C++`) and widening the check
+ * to those is a later change made on evidence, not a guess made here.
+ *
+ * The content between the markers allows an interior single asterisk via
+ * `\*(?!\*)` — a negative lookahead that accepts `*` as long as it isn't
+ * the start of another `**`, so a span like `**C* developer**` (a bolded
+ * run that itself contains a lone-asterisk token) still matches as one
+ * paired span instead of silently passing.
+ */
+const RESIDUAL_BOLD_PATTERN = /\*\*(?:[^*]|\*(?!\*))+\*\*/;
+
+/**
  * Returns the empty rubric used for an error row (RewriteFn threw, or
  * returned an unparseable response). All criteria fail so the row
  * surfaces in the report instead of being silently scored as a pass.
@@ -72,6 +91,7 @@ export function emptyRubricForError(): RubricResult {
     actionVerbLead: false,
     lengthSanity: false,
     noPreambleLeak: false,
+    noResidualMarkdown: false,
     dedupEffective: null,
     steeringAdherence: null,
     judgeCoherence: null,
@@ -182,6 +202,16 @@ export function scoreRubric({
       ? null
       : scoreAdherence(steering.check, outputBullets);
 
+  // ── (8) No residual markdown (#805) ──────────────────────────────────
+  // All-or-nothing over the record, not a rate over bullets — one bullet
+  // carrying a paired `**…**` fails the whole record, same shape as
+  // `noPreambleLeak`. Vacuously true for zero bullets: there is no
+  // markdown to find in nothing, which is also why this does NOT gate on
+  // `outputBullets.length > 0` the way `oneLinePerBullet` does.
+  const noResidualMarkdown = outputBullets.every(
+    (b) => !RESIDUAL_BOLD_PATTERN.test(b),
+  );
+
   const perBullet: PerBulletDiagnostic[] = outputBullets.map((b, i) => ({
     index: i,
     text: b,
@@ -196,6 +226,7 @@ export function scoreRubric({
     actionVerbLead,
     lengthSanity,
     noPreambleLeak,
+    noResidualMarkdown,
     dedupEffective,
     steeringAdherence,
     judgeCoherence: null,
