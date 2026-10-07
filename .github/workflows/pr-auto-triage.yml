@@ -33,10 +33,10 @@ concurrency:
   group: pr-auto-triage-${{ github.event.inputs.pr || github.event.pull_request.number || 'cron' }}
   cancel-in-progress: false
 
+# Every write goes through the gaal-agent app token minted below, so the
+# default token needs nothing beyond reading the repo.
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
 
 jobs:
   triage:
@@ -45,6 +45,8 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      APP_CLIENT_ID: Iv23lijWO2RZ8KF2POYi
     steps:
       # Always run the default branch's triage script. On `pull_request_review`
       # the default ref is the PR's merge commit, so checking that out would run
@@ -60,9 +62,32 @@ jobs:
         with:
           node-version: '20'
 
+      # `github.token` cannot resolve review threads here: resolveReviewThread
+      # comes back FORBIDDEN ("Resource not accessible by integration", #1171).
+      # pr-revise.yml resolves threads with this same app token, so mint it
+      # rather than granting `contents: write` to the default token on a job
+      # that runs on `pull_request_review`. The script only resolves threads
+      # and comments; it never approves, so the app identity cannot approve
+      # its own PRs.
+      - name: Mint the gaal-agent app token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.APP_CLIENT_ID }}
+          private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
+          # Scoped to what the script uses; without these the token gets every
+          # permission the app install has. No `workflows` scope.
+          # `contents: write` is what resolveReviewThread needs: `github.token`
+          # with `pull-requests: write` alone came back FORBIDDEN (#1171).
+          # `issues: write` covers `gh pr comment`, which posts through the
+          # issue-comments endpoint and is not wrapped like the resolves are.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
       - name: Run pr-auto-triage
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           # Inputs reach the shell as env vars, never as template expansions
           # inside `run:` — zizmor's template-injection audit.
