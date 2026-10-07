@@ -28,6 +28,12 @@
  * no penalty") rather than a new fixture — its baked corpus snapshot
  * carries 15 achievements, so its first achievement row's type picker is
  * guaranteed to render without hunting for one.
+ *
+ * The last describe block (#971) proves the below-`sm` scrim this file's
+ * own viewport (375px) is the one real-browser oracle for: whether it is
+ * actually present and covers the viewport, and whether tapping it closes
+ * the panel — `Popover.test.tsx` can only pin the class/dismiss contract in
+ * jsdom, which has no layout engine to confirm the scrim is visible at all.
  */
 import { test, expect } from "@playwright/test";
 import {
@@ -102,5 +108,66 @@ test.describe("Popover panel stays on screen at 375px (#959)", () => {
     const box = await panel.boundingBox();
     expect(box).not.toBeNull();
     assertContained(box!, await viewport(page));
+  });
+});
+
+test.describe("Popover scrim at 375px (#971)", () => {
+  test("open panel is accompanied by a scrim that covers the viewport", async ({
+    page,
+  }) => {
+    await dropFixtureAndWaitForParse(page, FIXTURE);
+    await dockScoreHero(page);
+
+    await page.getByRole("button", { name: "How is this scored?" }).click();
+    const panel = page.getByRole("dialog", { name: "How is this scored?" });
+    await expect(panel).toBeVisible();
+
+    // The scrim carries no role/name, so it is located structurally: the
+    // panel's immediate preceding sibling, which is where `Popover.tsx`
+    // renders it (same root `<div>`, scrim before panel).
+    const scrim = panel.locator("xpath=preceding-sibling::*[1]");
+    await expect(scrim).toBeVisible();
+    await expect(scrim).toHaveAttribute("aria-hidden", "true");
+
+    const box = await scrim.boundingBox();
+    expect(box).not.toBeNull();
+    const vp = await viewport(page);
+    expect(box).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
+  });
+
+  test("tapping the scrim closes the popover and returns focus to the trigger", async ({
+    page,
+  }) => {
+    await dropFixtureAndWaitForParse(page, FIXTURE);
+    await dockScoreHero(page);
+
+    const trigger = page.getByRole("button", { name: "How is this scored?" });
+    await trigger.click();
+    const panel = page.getByRole("dialog", { name: "How is this scored?" });
+    await expect(panel).toBeVisible();
+
+    const scrim = panel.locator("xpath=preceding-sibling::*[1]");
+    // Not a corner: `PageShell`'s own header is `sticky` at `z-20`, strictly
+    // above the scrim's `z-10`, so it paints OVER the scrim for the whole
+    // top of the viewport regardless of the panel's position — a point near
+    // a corner (e.g. (2, 2)) resolves to the header, not the scrim, and
+    // Playwright's actionability check times out waiting for an occluded
+    // element. Measured directly (`document.elementFromPoint`): the header
+    // is the hit at (2, 2), not the scrim, confirming this is the header
+    // sitting on top, not the bottom-anchored panel. The midpoint between
+    // the header's bottom edge and the panel's top edge is clear of both by
+    // construction, so this stays correct if either one's height changes.
+    const headerBox = await page.locator("header").first().boundingBox();
+    const panelBox = await panel.boundingBox();
+    expect(headerBox).not.toBeNull();
+    expect(panelBox).not.toBeNull();
+    const clearY = Math.round(
+      (headerBox!.y + headerBox!.height + panelBox!.y) / 2,
+    );
+
+    await scrim.click({ position: { x: 10, y: clearY } });
+
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
   });
 });
