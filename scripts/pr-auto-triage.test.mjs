@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   alreadyFlagged,
   parseBlockedPaths,
@@ -10,6 +10,7 @@ import {
   eligibilityMarker,
   extractLatestBotVerdict,
   findResolvableThreads,
+  resolveThreads,
 } from "./pr-auto-triage.mjs";
 
 describe("pr-auto-triage: classifyChangedFiles", () => {
@@ -150,6 +151,67 @@ describe("pr-auto-triage: findResolvableThreads", () => {
       { id: "PRRT_2", isResolved: false, firstCommentAuthor: "some-human" },
     ];
     expect(findResolvableThreads(threads, "APPROVE")).toEqual(["PRRT_1"]);
+  });
+});
+
+describe("pr-auto-triage: resolveThreads", () => {
+  it("resolves every thread when none fail", () => {
+    const calls = [];
+    const resolved = resolveThreads(["PRRT_1", "PRRT_2"], (id) => calls.push(id));
+    expect(calls).toEqual(["PRRT_1", "PRRT_2"]);
+    expect(resolved).toEqual(new Set(["PRRT_1", "PRRT_2"]));
+  });
+
+  it("a FORBIDDEN refusal returns normally, keeping what already resolved (#1171)", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const resolved = resolveThreads(["PRRT_1", "PRRT_2", "PRRT_3"], (id) => {
+      if (id === "PRRT_2") throw new Error("FORBIDDEN: Resource not accessible by integration");
+    });
+    expect(resolved).toEqual(new Set(["PRRT_1"]));
+    logSpy.mockRestore();
+  });
+
+  it("stops calling gh after the first FORBIDDEN and warns for every skipped thread", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const calls = [];
+    resolveThreads(["PRRT_1", "PRRT_2", "PRRT_3"], (id) => {
+      calls.push(id);
+      throw new Error("FORBIDDEN");
+    });
+    expect(calls).toEqual(["PRRT_1"]);
+    expect(logSpy.mock.calls.map((c) => c[0])).toEqual([
+      "::warning::could not resolve PRRT_1",
+      "::warning::could not resolve PRRT_2",
+      "::warning::could not resolve PRRT_3",
+    ]);
+    logSpy.mockRestore();
+  });
+
+  it("logs a warning for a thread that failed to resolve", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    resolveThreads(["PRRT_1"], () => {
+      throw new Error("FORBIDDEN");
+    });
+    expect(logSpy).toHaveBeenCalledWith("::warning::could not resolve PRRT_1");
+    logSpy.mockRestore();
+  });
+
+  it("rethrows a non-FORBIDDEN failure instead of swallowing it", () => {
+    expect(() =>
+      resolveThreads(["PRRT_1"], () => {
+        throw new Error("502 Bad Gateway");
+      })
+    ).toThrow("502 Bad Gateway");
+  });
+
+  it("tolerates the real execFileSync shape, where FORBIDDEN is on .stdout and not folded into .message", () => {
+    const resolved = resolveThreads(["PRRT_1"], () => {
+      const err = new Error("Command failed: gh api graphql");
+      err.stdout = '{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}';
+      err.stderr = "gh: Resource not accessible by integration (HTTP 403)";
+      throw err;
+    });
+    expect(resolved).toEqual(new Set());
   });
 });
 

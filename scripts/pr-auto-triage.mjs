@@ -179,6 +179,50 @@ export function findResolvableThreads(threads, botVerdict) {
 }
 
 /**
+ * Resolve each thread ID via `resolveOne`, tolerating only the documented
+ * FORBIDDEN refusal.
+ *
+ * `github.token` on `pull_request_review` carries no `contents: write`, so
+ * GitHub refuses `resolveReviewThread` with a FORBIDDEN error (#1171) until the
+ * workflow is switched to a minted App token. That one refusal must not sink
+ * the rest of the triage run. This is deliberately narrower than
+ * `pr-revise.yml`'s resolve loop, which warns and carries on past *any*
+ * failure: here any other failure (a bad mutation, a rate limit, fully revoked
+ * auth) is a real regression and must fail the job loudly instead of degrading
+ * to a silent `::warning::` forever.
+ *
+ * The refusal is a property of the token, not of the thread, so the first one
+ * stands for the whole batch: the remaining threads are warned about and
+ * skipped rather than each spawning a `gh` call that is bound to be refused
+ * again, on every 30-minute run.
+ *
+ * @param {string[]} threadIds
+ * @param {(id: string) => void} resolveOne throws on failure
+ * @returns {Set<string>} IDs that actually resolved
+ */
+export function resolveThreads(threadIds, resolveOne) {
+  const resolved = new Set();
+  for (const [i, id] of threadIds.entries()) {
+    try {
+      resolveOne(id);
+      resolved.add(id);
+    } catch (err) {
+      // A real `execFileSync` failure puts `gh`'s GraphQL error body on
+      // `.stdout`, not folded into `.message` — `.message` alone (the shape
+      // `new Error("FORBIDDEN...")` fabricates in tests) never matches the
+      // live refusal (#1171's follow-up review).
+      const haystack = `${err?.message ?? ""}\n${err?.stdout ?? ""}\n${err?.stderr ?? ""}`;
+      if (!/FORBIDDEN/.test(haystack)) throw err;
+      for (const skipped of threadIds.slice(i)) {
+        console.log(`::warning::could not resolve ${skipped}`);
+      }
+      break;
+    }
+  }
+  return resolved;
+}
+
+/**
  * Marker on the eligibility comment, keyed to the head commit it vouches for.
  * The workflow runs every 30 minutes, so without it an eligible PR would be
  * flagged again on every run; a new push gets a new head, and a fresh flag.
@@ -386,21 +430,21 @@ export async function runCli(argv = process.argv.slice(2)) {
     const resolvableThreadIds = findResolvableThreads(pr.reviewThreads, verdict);
     if (resolvableThreadIds.length > 0) {
       console.log(`Resolving ${resolvableThreadIds.length} open thread(s) (verdict is APPROVE)...`);
-      for (const id of resolvableThreadIds) {
-        if (!dryRun) {
-          runGh([
-            "api",
-            "graphql",
-            "-f",
-            `query=mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }`,
-            "-f",
-            `id=${id}`,
-          ]);
-        }
-      }
+      const resolvedThreadIds = dryRun
+        ? new Set(resolvableThreadIds)
+        : resolveThreads(resolvableThreadIds, (id) =>
+            runGh([
+              "api",
+              "graphql",
+              "-f",
+              `query=mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }`,
+              "-f",
+              `id=${id}`,
+            ])
+          );
       // Update local thread states
       for (const t of pr.reviewThreads) {
-        if (resolvableThreadIds.includes(t.id)) t.isResolved = true;
+        if (resolvedThreadIds.has(t.id)) t.isResolved = true;
       }
       // `needs-human` is deliberately left alone. pr-auto-rebase.yml,
       // pr-revise.yml and gaal-agent.yml also add it for reasons that have
