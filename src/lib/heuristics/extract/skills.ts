@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import type { PdfSection } from "../line-model.ts";
+import type { PdfLine, PdfSection } from "../line-model.ts";
 import type { PdfTextItem, SkillCategory } from "../types.ts";
 import { mergeItemText } from "../line-assembly.ts";
 import { isBulletGlyph, stripBullet } from "../line-primitives.ts";
@@ -144,9 +144,18 @@ function looksLikeContactLink(tok: string): boolean {
  *  are not noise, so they are allowlisted rather than lowering the floor. */
 const SINGLE_LETTER_SKILLS = new Set(["c", "r", "d"]);
 
+/** Max length (chars) a single skill token may have (see `isSkillToken`).
+ *  Condition B′ (below) checks a prospective join against `isSkillToken`
+ *  itself — which enforces this cap among its other rules — before
+ *  committing to it: a geometry-confirmed join that `isSkillToken` would
+ *  reject outright would otherwise vanish once `tokenizeCell` rejects the
+ *  merged token, losing both fragments instead of leaving them
+ *  shredded-but-visible. */
+const MAX_SKILL_TOKEN_LENGTH = 40;
+
 function isSkillToken(tok: string): boolean {
   if (tok.length === 1 && SINGLE_LETTER_SKILLS.has(tok.toLowerCase())) return true;
-  if (tok.length < 2 || tok.length > 40) return false;
+  if (tok.length < 2 || tok.length > MAX_SKILL_TOKEN_LENGTH) return false;
   if (/^\d+$/.test(tok)) return false;
   // A professional-profile link (or its bare "GitHub" / "LinkedIn" heading) is
   // contact info, not a skill — drop it wherever in the doc it surfaced.
@@ -416,6 +425,37 @@ function hasUnclosedParen(text: string): boolean {
   return scanParens(text).depth > 0;
 }
 
+/** True when `text` carries a comma OUTSIDE any parenthesis — the only kind
+ *  that signals an unterminated top-level list, as opposed to a clarifier's
+ *  own internal enumeration ("Google Suite (Docs, Sheets, Slides)", whose only
+ *  commas sit inside a balanced paren). Condition B′ uses this instead of a
+ *  bare `.includes(",")` — see its call site for the false-merge that a naive
+ *  substring check produces on a fully-parenthesised, fully-closed clarifier
+ *  (#834). Shares `scanParens` with `splitRespectingParens`/`hasUnclosedParen`
+ *  so all three agree on what "balanced" means. */
+function hasTopLevelComma(text: string): boolean {
+  return scanParens(text).outsideCommas.length > 0;
+}
+
+/**
+ * The piece a prospective Condition B′ join would actually turn into a token
+ * — `pending`'s LAST top-level-comma-delimited item plus `nextText` — not
+ * `pending` whole. `pending` is the WHOLE accumulated list so far and is
+ * almost always far longer than its final item; checking the full string
+ * against `isSkillToken` would decline joins that are actually fine. Takes
+ * the caller's already-computed `outsideCommas` so this adds no extra
+ * `scanParens` scan.
+ */
+function joinedFinalSegment(
+  pending: string,
+  outsideCommas: number[],
+  nextText: string,
+): string {
+  const start = outsideCommas.length > 0 ? outsideCommas[outsideCommas.length - 1] + 1 : 0;
+  const finalSegment = pending.slice(start).trim();
+  return `${finalSegment} ${nextText.trim()}`;
+}
+
 /**
  * How many subsequent physical lines Condition C will scan for the paren that
  * closes a clarifier which soft-wrapped mid-list.
@@ -435,17 +475,162 @@ function hasUnclosedParen(text: string): boolean {
 const CLARIFIER_WRAP_LOOKAHEAD = 4;
 
 /**
+ * How close a physical line's right edge must land to the established margin
+ * (see `buildMarginIndex`) to count as a forced wrap — Condition B′ — rather
+ * than a short line that merely ends.
+ *
+ * Real word-wrap breaks AT MOST the width of the one word that didn't fit —
+ * not a fixed handful of characters. On `single-word-name-mononym` (a real
+ * extracted PDF, not a synthetic fixture) the omitted word is "Systems" and
+ * the slack it leaves is ~33pt at 10–11pt body sizes; a synthetic test built
+ * from character-proportional widths (no such slack) doesn't expose this.
+ * ~40pt covers a realistic omitted word at these body sizes, while staying
+ * well under the 50pt+ gap a genuinely short standalone skill line leaves
+ * versus a document's forced-wrap lines (#834).
+ */
+const SKILLS_WRAP_MARGIN_TOLERANCE_PT = 40;
+
+/** Right edge (PDF points) of the right-most non-blank item on a line — the
+ *  geometry `isSoftWrapContinuation`'s Condition B′ compares against the
+ *  established margin. `undefined` when the line carries no items at all —
+ *  the markdown/DOCX pseudo-line shape (`markdown-lines.ts`'s `buildLine`
+ *  always sets `items: []`) — rather than falling back to `line.x`, which is
+ *  hardcoded to `0` on that path and would make every such line trivially
+ *  "reach" a margin of `0`, firing Condition B′ on any DOCX comma-list +
+ *  standalone-final-skill pair and reintroducing the exact false-merge #834
+ *  fixed. A line with real geometry but no non-blank items still falls back
+ *  to its own `line.x`, as before. */
+function lineRightEdge(line: PdfLine): number | undefined {
+  if (line.items.length === 0) return undefined;
+  let max = line.x;
+  for (const item of line.items) {
+    if (item.str.trim() === "") continue;
+    max = Math.max(max, item.x + item.width);
+  }
+  return max;
+}
+
+/**
+ * The right margin a forced wrap runs out to is a property of the document's
+ * text column, not of one section — the summary and experience lines run out
+ * to the same edge the skills section's wrapped lines do. `buildMarginIndex`
+ * scans `lines` ONCE for its non-blank single-column physical lines and keeps
+ * just the two largest right edges plus which line the largest belongs to
+ * and the full qualifying set — enough for `marginRightExcluding` to answer
+ * "max right edge excluding this one line" in O(1) for every candidate join
+ * `collectSkillCells` evaluates, rather than rescanning `lines` per join,
+ * which would be O(n²) over the section (#834 follow-up).
+ *
+ * Call with the WHOLE document's lines when available (the margin's true
+ * scope); `extractSkills` falls back to the skills section's own lines when
+ * the caller has none, preserving the pre-widening section-scoped behavior.
+ */
+function buildMarginIndex(lines: PdfLine[]): {
+  qualifying: Set<PdfLine>;
+  topLine: PdfLine | undefined;
+  topEdge: number | undefined;
+  secondEdge: number | undefined;
+} {
+  const qualifying = new Set<PdfLine>();
+  let topLine: PdfLine | undefined;
+  let topEdge: number | undefined;
+  let secondEdge: number | undefined;
+  for (const line of lines) {
+    const cells = splitColumnCells(line);
+    if (cells.length !== 1) continue;
+    if ((cells[0] ?? "").trim() === "") continue;
+    const edge = lineRightEdge(line);
+    // No geometry (markdown/DOCX pseudo-line): it can't establish a margin,
+    // so it is excluded from `qualifying` entirely rather than counted with
+    // an edge that doesn't exist.
+    if (edge === undefined) continue;
+    qualifying.add(line);
+    if (topEdge === undefined || edge > topEdge) {
+      secondEdge = topEdge;
+      topEdge = edge;
+      topLine = line;
+    } else if (secondEdge === undefined || edge > secondEdge) {
+      secondEdge = edge;
+    }
+  }
+  return { qualifying, topLine, topEdge, secondEdge };
+}
+
+/**
+ * The established right margin from `index`, EXCLUDING `excludeLine` — or
+ * `undefined` when fewer than two OTHER qualifying lines remain.
+ *
+ * `excludeLine` is `pending`'s last physical line: a line can't be allowed to
+ * establish the very margin it is then measured against, or the check is
+ * trivially true for whichever line happens to be widest. A lone remaining
+ * line has the same problem one level down — it "reaches" its own edge, which
+ * isn't a margin at all — so the floor is two OTHER lines, not one (see #834
+ * follow-up: exclusion without a two-remaining floor lets a wide pending line
+ * clear a single narrow remaining line's margin just as easily as letting it
+ * define its own).
+ */
+function marginRightExcluding(
+  index: ReturnType<typeof buildMarginIndex>,
+  excludeLine: PdfLine | undefined,
+): number | undefined {
+  const excluded = excludeLine !== undefined && index.qualifying.has(excludeLine);
+  const remaining = index.qualifying.size - (excluded ? 1 : 0);
+  if (remaining < 2) return undefined;
+  return excluded && excludeLine === index.topLine ? index.secondEdge : index.topEdge;
+}
+
+/** True when a physical line's right edge runs out to (within
+ *  `SKILLS_WRAP_MARGIN_TOLERANCE_PT` of, on EITHER side) the section's
+ *  established margin — the geometric signature of a forced wrap. The band is
+ *  symmetric, not a one-sided floor: `marginRightExcluding` only deflates
+ *  `marginRight` when `pending`'s own line is excluded from the index, which
+ *  happens only when that line is the single widest qualifying one. When it
+ *  isn't, `marginRight` can land AT `pending`'s own edge (or, once excluded,
+ *  BELOW it) — and an open-ended `prevRightEdge >= marginRight - TOLERANCE`
+ *  is then satisfied no matter how far `prevRightEdge` overshoots, trivially
+ *  true for whichever line happens to be widest in scope. A genuine forced
+ *  wrap runs out TO the column's margin, not past it by an arbitrary amount,
+ *  so bounding both sides is what actually tests that. `undefined` on either
+ *  side (no established margin, or no tracked right edge for `pending`'s last
+ *  physical line) means the signal isn't available, so the answer is "no",
+ *  not a guess. */
+function runsToMargin(geometry: WrapMarginGeometry): boolean {
+  const { prevRightEdge, marginRight } = geometry;
+  if (prevRightEdge === undefined || marginRight === undefined) return false;
+  return Math.abs(prevRightEdge - marginRight) <= SKILLS_WRAP_MARGIN_TOLERANCE_PT;
+}
+
+/** Geometry `isSoftWrapContinuation` needs for Condition B′ — kept as a small
+ *  data object (like `upcoming`) so the predicate stays pure and data-driven
+ *  rather than reaching into `PdfLine`/`PdfSection` itself. */
+interface WrapMarginGeometry {
+  /** Right edge of the LAST physical line accumulated into `pending` so far
+   *  (updated on every join, not just the first line — see
+   *  `collectSkillCells`). `undefined` before any line has been tracked. */
+  prevRightEdge: number | undefined;
+  /** The established right margin (`buildMarginIndex`/`marginRightExcluding`
+   *  — the whole document's text column when available, else this section
+   *  alone), or `undefined` when too few qualifying single-column lines exist
+   *  to establish one. */
+  marginRight: number | undefined;
+}
+
+/**
  * True when the pending accumulated text and `nextText` together indicate a
  * soft-wrap: the line break happened mid-skill-name or mid-list, not between
  * two independent items.
  *
- * Two conditions trigger a join:
+ * Conditions that trigger a join:
  *   A) The PENDING line ends with an explicit continuation character (`&`, `-`,
  *      `–`, `+`) — e.g. `"Hiring &"` → clearly continues onto the next line.
  *   B) The NEXT line contains a comma (meaning it is itself part of a longer
  *      comma-separated list that wrapped) AND the pending line does NOT end
  *      with a comma/semicolon (which would make the previous line a complete
  *      entry followed by a new one).
+ *   B′) The mirror of B for the FINAL wrap of a list, where the NEXT line
+ *      carries no comma of its own because it IS the end of the list — see
+ *      the Condition B′ block below for why GEOMETRY, not text, is what
+ *      separates this from a genuine standalone final skill (#834).
  *
  * Both guards also reject standalone profile/contact links and new-sub-list
  * patterns unconditionally.
@@ -454,6 +639,7 @@ function isSoftWrapContinuation(
   pending: string,
   nextText: string,
   upcoming: string[],
+  geometry: WrapMarginGeometry,
 ): boolean {
   // Always skip standalone profile/contact links — they are their own items.
   if (looksLikeContactLink(nextText)) return false;
@@ -472,6 +658,12 @@ function isSoftWrapContinuation(
   // (fluent),"), which `isLanguageProficiencyCell` — and this guard — leaves
   // alone because a trailing delimiter never resolves as a complete cell.
   if (isLanguageProficiencyCell(pending)) return false;
+
+  // Computed once and shared by Condition C and Condition B′ below — both
+  // need `pending`'s own paren balance / top-level commas, and re-scanning it
+  // per conjunct (up to 3x) was flagged as redundant on a section-sized
+  // string per candidate join.
+  const pendingParens = scanParens(pending);
 
   // Condition A′ (symmetric to A): the NEXT line LEADS with a bare connector
   // glyph — a soft-wrap that broke a skill/list immediately BEFORE the connector
@@ -534,7 +726,7 @@ function isSoftWrapContinuation(
   //
   // Invariant: join only when the break is mid-list INSIDE an open clarifier and
   // that clarifier demonstrably CLOSES within the look-ahead window.
-  if (hasUnclosedParen(pending) && /,\s*$/.test(pending)) {
+  if (pendingParens.depth > 0 && /,\s*$/.test(pending)) {
     let joined = `${pending} ${nextText}`;
     if (!hasUnclosedParen(joined)) return true;
     for (const following of upcoming.slice(0, CLARIFIER_WRAP_LOOKAHEAD)) {
@@ -576,20 +768,51 @@ function isSoftWrapContinuation(
   )
     return true;
 
-  // Condition B′, investigated for #834 and deliberately NOT implemented: B's
-  // mirror for the FINAL wrap of a list, where `nextText` carries no comma of
-  // its own ("…, gRPC, Distributed" ⏎ "Systems") because it IS the end of the
-  // list. The text available here cannot tell that case apart from a genuine
-  // standalone final skill ("Python, Go, Rust" ⏎ "Machine Learning") — both are
-  // a short, comma-less last line following a pending fragment that already
-  // has a comma and doesn't end on one. Word-count and "is this the section's
-  // last cell" (the two guards that looked promising) are identical for both,
-  // so any join narrow enough to rejoin the former also rejoins the latter,
-  // trading one shredded skill for a different lost one. Separating them needs
-  // the line's geometry (did `pending`'s last physical line actually run out to
-  // the column width, i.e. a forced wrap, vs. a short line that just ends) —
-  // `isSoftWrapContinuation` sees only joined text, not `PdfLine.x`/item
-  // widths, so that signal isn't available here. See #834.
+  // Condition B′ (#834): the mirror of B for the FINAL wrap of a comma-list,
+  // where `nextText` carries no comma of its own ("…, gRPC, Distributed" ⏎
+  // "Systems") because it IS the end of the list. Text alone cannot tell that
+  // case apart from a genuine standalone final skill ("Python, Go, Rust" ⏎
+  // "Machine Learning") — both are a short, comma-less last line following a
+  // pending fragment that already has a comma and doesn't end on one (see the
+  // #834 regression test below). GEOMETRY is what separates them: a forced
+  // wrap's pending line was pushed out to the document's own right margin
+  // before it broke; a standalone final skill's preceding line just ends
+  // wherever its own content ends, almost always well short of that margin.
+  // `runsToMargin` compares the right edge of `pending`'s LAST physical line
+  // (tracked by `collectSkillCells`, not necessarily its first) against the
+  // established margin (`buildMarginIndex`/`marginRightExcluding` — the whole
+  // document's text column when the caller has it, else this section alone)
+  // within a small tolerance.
+  //
+  // Uses `hasTopLevelComma`, NOT a bare `.includes(",")`: a fully-parenthesised,
+  // fully-closed clarifier ("Google Suite (Docs, Sheets, Slides) · Learning:
+  // Salesforce · Tableau") carries commas but none of them signal an
+  // unterminated list — they are the clarifier's own internal enumeration. A
+  // naive substring check misread that shape as a dangling fragment and merged
+  // it with an unrelated following middot-separated skill on a re-exported
+  // PDF's skills line (caught by `corpus-roundtrip.test.ts`). The paren-balance
+  // conjunct additionally guards against joining on a pending whose paren
+  // Condition C already tried, and failed, to close.
+  //
+  // The final `isSkillToken(joinedFinalSegment(...))` conjunct guards the join
+  // itself: a geometry-confirmed wrap can still merge into a token
+  // `isSkillToken` then rejects outright — not just for length, but for word
+  // count (>6), a date-range shape, or a contact-link shape too — and an
+  // outright rejection loses BOTH fragments — worse than the pre-#834
+  // shredded-but-visible pair. Checking `isSkillToken` directly (rather than
+  // re-deriving just its length rule) is what keeps this conjunct in sync with
+  // every way `tokenizeCell` can still drop the joined candidate. Declining
+  // here instead leaves each fragment to flush and tokenize on its own, same
+  // as before this fix existed.
+  if (
+    pendingParens.outsideCommas.length > 0 &&
+    pendingParens.depth === 0 &&
+    !/[,;]\s*$/.test(pending) &&
+    !hasTopLevelComma(nextText) &&
+    runsToMargin(geometry) &&
+    isSkillToken(joinedFinalSegment(pending, pendingParens.outsideCommas, nextText))
+  )
+    return true;
 
   return false;
 }
@@ -611,16 +834,37 @@ function isSoftWrapContinuation(
  * prefix like `Databases: …`), or that is a standalone contact/profile link
  * like `"GitHub"`, is not a continuation — it flushes the pending accumulated
  * text and starts fresh.
+ *
+ * Also tracks `pending`'s LAST physical line (#834) — updated on every join,
+ * not the first line, so a 3+ line list evaluates Condition B′ against the
+ * physical line that actually sits next to the break. Its right edge
+ * (`lineRightEdge`, derived at the Condition B′ call site rather than cached —
+ * the two are always in lockstep, so a separate field would just be state
+ * that could drift) feeds the geometry B′ checks, and the line itself lets
+ * `marginRightExcluding` exclude it from the margin index on every candidate
+ * join — a line can't establish the margin it is then tested against.
+ *
+ * `documentLines`, when given, is the scope the margin index is built over
+ * (the whole document, not just this section — see `buildMarginIndex`);
+ * `undefined` falls back to `lines` itself, i.e. today's section-scoped
+ * behavior.
  */
-function collectSkillCells(lines: PdfSection["lines"]): string[] {
+function collectSkillCells(
+  lines: PdfSection["lines"],
+  documentLines?: PdfLine[],
+): string[] {
   const result: string[] = [];
   let pending = "";
+  let pendingLine: PdfLine | undefined;
+
+  const marginIndex = buildMarginIndex(documentLines ?? lines);
 
   const flush = () => {
     if (pending) {
       result.push(pending);
       pending = "";
     }
+    pendingLine = undefined;
   };
 
   // Split every line's columns once up front. Condition C's n-line look-ahead
@@ -644,13 +888,18 @@ function collectSkillCells(lines: PdfSection["lines"]): string[] {
       if (!text) continue;
       if (
         pending &&
-        isSoftWrapContinuation(pending, text, upcomingContinuationTexts(lineCells, i + 1))
+        isSoftWrapContinuation(pending, text, upcomingContinuationTexts(lineCells, i + 1), {
+          prevRightEdge: pendingLine ? lineRightEdge(pendingLine) : undefined,
+          marginRight: marginRightExcluding(marginIndex, pendingLine),
+        })
       ) {
         // Looks like a continuation — join with a space.
         pending += " " + text;
+        pendingLine = lines[i];
       } else {
         flush();
         pending = text;
+        pendingLine = lines[i];
       }
     }
   }
@@ -714,6 +963,7 @@ function matchCellLabel(cell: string): string | undefined {
 
 export function extractSkills(
   skills: PdfSection | undefined,
+  documentLines?: PdfLine[],
 ): { value: string[]; categories?: SkillCategory[]; confidence: number } {
   if (!skills || skills.lines.length === 0) return { value: [], confidence: 0 };
 
@@ -731,7 +981,7 @@ export function extractSkills(
   // entirely rather than invent a bucket, keeping invariant (1) exact.
   let hasUncategorisedHead = false;
 
-  for (const cell of collectSkillCells(skills.lines)) {
+  for (const cell of collectSkillCells(skills.lines, documentLines)) {
     const cellTokens: string[] = [];
     for (const tok of tokenizeSkillLine(cell)) {
       if (seen.has(tok)) continue;

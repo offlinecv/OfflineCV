@@ -428,7 +428,7 @@ function buildHeuristicResult(
     : [];
 
   const summary = extractSummary(summarySection);
-  const skills = extractSkills(skillsSection);
+  const skills = extractSkills(skillsSection, lines);
   const experience = extractGroupedExperience(experienceGroups, experienceSection);
   const education = extractEducation(educationSection);
   const projects = extractProjects(projectsSection);
