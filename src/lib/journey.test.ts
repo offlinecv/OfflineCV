@@ -7,10 +7,11 @@
  * What is pinned here is the BEHAVIOUR a user reads off the rail — which stage
  * says "you are here", which stages claim to have something behind them, and
  * (since #826) which claim the user has actually BEEN there — for each of the
- * states the two entries can be in. The shape of `JOURNEY_STAGES` is not
- * asserted beyond the two rules a future edit is most likely to break
- * silently: `download` is never current, and the first stage has no empty
- * state to fall back to.
+ * states the three entries (`root`, `jobs`, and — since #1180 — `download`)
+ * can be in. The shape of `JOURNEY_STAGES` is not asserted beyond the two
+ * rules a future edit is most likely to break silently: `download` is
+ * `current` only on the `/download/` entry, never merely because an export
+ * happened, and the first stage has no empty state to fall back to.
  *
  * The three-way split between availability, completion and `current` is the
  * load-bearing thing here. Availability answers "can you go", completion
@@ -168,10 +169,12 @@ describe("deriveJourney — where the user is", () => {
     expect(journey.availability.add).toBe(false);
   });
 
-  it("never parks the user on Download", () => {
-    // The terminal action is reachable from anywhere, but it is not a place
-    // you sit: exporting does not end the journey, and a rail that said so
-    // would stop inviting the edit-and-re-export loop the product is built on.
+  it("never parks the user on Download merely because an export happened", () => {
+    // `completed.download` is the "has exported" fact; it must never relocate
+    // the user on `/` or `/jobs/` — exporting does not end the journey, and a
+    // rail that said so would stop inviting the edit-and-re-export loop the
+    // product is built on. `/download/` itself is the one exception (#1180,
+    // next describe block), and it is unconditional, not keyed off this flag.
     for (const entry of ["root", "jobs"] as const) {
       for (const hasResume of [false, true]) {
         for (const jdSteering of [false, true]) {
@@ -187,6 +190,47 @@ describe("deriveJourney — where the user is", () => {
         }
       }
     }
+  });
+});
+
+describe("deriveJourney — the /download/ entry (#1180)", () => {
+  it("reads /download/ as Download whether or not a résumé arrived", () => {
+    // Same unconditional reading as `/jobs/` and `match`: standing on the
+    // export surface with nothing behind it yet is still standing there.
+    for (const hasResume of [false, true]) {
+      const journey = deriveJourney(signals({ entry: "download", hasResume }));
+      expect(journey.current).toBe("download");
+    }
+  });
+
+  it("never reads /download/ as anything else, regardless of steering or the library", () => {
+    for (const hasStoredResume of [false, true]) {
+      for (const jdSteering of [false, true]) {
+        const journey = deriveJourney(
+          signals({ entry: "download", hasStoredResume, jdSteering }),
+        );
+        expect(journey.current).toBe("download");
+      }
+    }
+  });
+
+  it("keeps availability keyed on the résumé the same way every other entry is", () => {
+    const empty = deriveJourney(signals({ entry: "download" }));
+    expect(empty.availability.download).toBe(false);
+    const withResume = deriveJourney(
+      signals({ entry: "download", hasResume: true }),
+    );
+    expect(withResume.availability.download).toBe(true);
+  });
+
+  it("omits Tailor on /download/, same as a cold /", () => {
+    // `/download/` has no "Tailor résumé to this job" button on screen either,
+    // so Tailor falls through to the same hidden-by-default rule as `/`.
+    const journey = deriveJourney(
+      signals({ entry: "download", hasResume: true }),
+    );
+    expect(journey.stages.map((s) => s.id)).not.toContain("tailor");
+    expect(journey.availability.tailor).toBe(false);
   });
 });
 

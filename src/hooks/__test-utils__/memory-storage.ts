@@ -56,8 +56,24 @@ class MemoryStorage {
  * `writable`/`configurable` overwrites either shape unconditionally.
  */
 export function installMemoryLocalStorage(): Storage {
+  return installMemoryStorage("localStorage");
+}
+
+/**
+ * The `sessionStorage` twin of `installMemoryLocalStorage`, for the same Node
+ * 22+ reason: the built-in global is not jsdom's `Storage`, so a suite that
+ * fakes a throwing write by patching `Storage.prototype` — or spying on the
+ * global — never reaches it on newer runtimes. Spy on the returned shim.
+ */
+export function installMemorySessionStorage(): Storage {
+  return installMemoryStorage("sessionStorage");
+}
+
+function installMemoryStorage(
+  name: "localStorage" | "sessionStorage",
+): Storage {
   const storage = new MemoryStorage() as unknown as Storage;
-  Object.defineProperty(globalThis, "localStorage", {
+  Object.defineProperty(globalThis, name, {
     value: storage,
     writable: true,
     configurable: true,
