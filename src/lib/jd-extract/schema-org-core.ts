@@ -192,6 +192,16 @@ export function extractWorkModel(
 }
 
 /**
+ * Pay is formatted with a pinned locale, not the runtime's. The string is
+ * persisted on `JobRecord.salaryRange` and compared for equality by
+ * `corroborates()` in job-duplicates.ts, so a locale-dependent grouping
+ * would make the same posting fail to dedupe across two machines. Pinned
+ * `en-US` also keeps the grouping coherent with the ISO currency code the
+ * posting supplies (`USD 150,000`, never `USD 1,50,000`).
+ */
+const SALARY_LOCALE = "en-US";
+
+/**
  * Format `baseSalary` into display text.
  *
  * Deliberately produces a string, not numbers. Currency, period, and open-ended
@@ -210,7 +220,7 @@ export function extractSalary(
 
   if (!value || typeof value !== "object") {
     if (typeof value === "number") {
-      return `${currency} ${value.toLocaleString()}`.trim();
+      return `${currency} ${value.toLocaleString(SALARY_LOCALE)}`.trim();
     }
     return undefined;
   }
@@ -222,10 +232,11 @@ export function extractSalary(
 
   if (min && max) {
     const suffix = unitText ? ` per ${unitText.toLowerCase()}` : "";
-    return `${currency} ${min.toLocaleString()} - ${max.toLocaleString()}${suffix}`.trim();
+    return `${currency} ${min.toLocaleString(SALARY_LOCALE)} - ${max.toLocaleString(SALARY_LOCALE)}${suffix}`.trim();
   }
-  if (min) return `${currency} ${min.toLocaleString()}+`.trim();
-  if (max) return `Up to ${currency} ${max.toLocaleString()}`.trim();
+  if (min) return `${currency} ${min.toLocaleString(SALARY_LOCALE)}+`.trim();
+  if (max)
+    return `Up to ${currency} ${max.toLocaleString(SALARY_LOCALE)}`.trim();
 
   return undefined;
 }

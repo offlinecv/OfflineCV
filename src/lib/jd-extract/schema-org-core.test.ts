@@ -182,6 +182,30 @@ describe("extractSalary", () => {
     expect(extractSalary({ baseSalary: { value: { minValue: 100 } } })).toBe("100+");
   });
 
+  it("groups digits independently of the runtime's default locale", () => {
+    // Above 99,999 on purpose: Indian grouping only diverges from Western
+    // grouping past that, so a value like 90,000 (see "formats a scalar
+    // value" above) would pass under either locale and pin nothing here.
+    // Drives all four extractSalary branches — scalar, min&max, min-only,
+    // max-only — so un-pinning any single site regresses this test, not
+    // just the min&max one.
+    const spy = vi.spyOn(Number.prototype, "toLocaleString");
+    extractSalary({ baseSalary: { currency: "EUR", value: 150000 } });
+    extractSalary({
+      baseSalary: {
+        currency: "USD",
+        value: { minValue: 150000, maxValue: 200000 },
+      },
+    });
+    extractSalary({ baseSalary: { currency: "USD", value: { minValue: 150000 } } });
+    extractSalary({ baseSalary: { currency: "USD", value: { maxValue: 200000 } } });
+    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(5);
+    for (const [locale] of spy.mock.calls) {
+      expect(locale).toBe("en-US");
+    }
+    spy.mockRestore();
+  });
+
   it("returns undefined when baseSalary is absent or unusable", () => {
     expect(extractSalary({})).toBeUndefined();
     expect(extractSalary({ baseSalary: { currency: "USD", value: {} } })).toBeUndefined();
