@@ -29,6 +29,7 @@ describe("scoreRubric — canned good outputs", () => {
     expect(r.lengthSanity).toBe(true);
     expect(r.noPreambleLeak).toBe(true);
     expect(r.numbersPreserved).toBe(true);
+    expect(r.noResidualMarkdown).toBe(true);
     expect(r.dedupEffective).toBeNull(); // n/a for weak fixtures
   });
 
@@ -210,6 +211,7 @@ describe("scoreRubric — empty output (model returned nothing parseable)", () =
     // The non-bullet-dependent criteria still report honestly.
     expect(r.numbersPreserved).toBe(true); // input had no numeric tokens
     expect(r.noPreambleLeak).toBe(true); // raw was empty
+    expect(r.noResidualMarkdown).toBe(true); // vacuously — no bullets to flag
   });
 });
 
@@ -220,10 +222,88 @@ describe("emptyRubricForError", () => {
     expect(r.actionVerbLead).toBe(false);
     expect(r.lengthSanity).toBe(false);
     expect(r.noPreambleLeak).toBe(false);
+    expect(r.noResidualMarkdown).toBe(false);
     expect(r.oneLinePerBullet).toBe(false);
     expect(r.dedupEffective).toBeNull();
     expect(r.judgeCoherence).toBeNull();
     expect(r.perBullet).toEqual([]);
+  });
+});
+
+// ── No residual markdown (#805) ──────────────────────────────────────────
+
+describe("scoreRubric — noResidualMarkdown", () => {
+  it("fails on the exact Gemma `terse` shape #781 shipped (paired bold survived cleanup)", () => {
+    // The 2026-08-07 reports recorded this verbatim at
+    // `records[].rubric.perBullet[].text`, post-`cleanRewriteLine`, and
+    // `noPreambleLeak` scored PASS on it. That is the defect this
+    // criterion exists to surface.
+    const input = ["Led the migration of the billing platform."];
+    const output = out([
+      "**Led** the migration of the billing platform across 12 regional markets.",
+    ]);
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noResidualMarkdown).toBe(false);
+  });
+
+  it("passes the same bullet after the #781 fix stripped the bold", () => {
+    const input = ["Led the migration of the billing platform."];
+    const output = out([
+      "Led the migration of the billing platform across 12 regional markets.",
+    ]);
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noResidualMarkdown).toBe(true);
+  });
+
+  it("bites on a deliberately markdown-bearing output (the way #608 required of scoreAdherence)", () => {
+    const input = ["Managed a team of 5 engineers."];
+    const output = out([
+      "Grew the team to **12 engineers** across three regional offices.",
+    ]);
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noResidualMarkdown).toBe(false);
+  });
+
+  it("fails the whole record when only ONE of several bullets carries markdown", () => {
+    // All-or-nothing, not a rate over bullets (#805 decision 3).
+    const input = ["A", "B"];
+    const output = out([
+      "Shipped the onboarding redesign across 4 squads in one quarter.",
+      "**Cut** support ticket volume 30% by launching a self-serve help center.",
+    ]);
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noResidualMarkdown).toBe(false);
+  });
+
+  it("fails on a paired span with an interior single asterisk", () => {
+    const r = scoreRubric({
+      input: ["X"],
+      output: out(["Supported **C* developer** tooling."]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(false);
+  });
+
+  it.each([
+    ["a C++ mention", "Migrated the C++ service layer to a managed runtime."],
+    ["a snake_case token", "Refactored the billing_pipeline module for clarity."],
+    ["a markdown heading marker", "Led the #1 initiative on the platform team."],
+    ["a lone, unpaired asterisk", "Owned the build for the C* driver integration."],
+    [
+      "an unpaired double-asterisk with no closing pair",
+      "Delivered the roadmap **ahead of schedule across three teams.",
+    ],
+  ])("does NOT false-positive on %s", (_label, bullet) => {
+    const r = scoreRubric({
+      input: ["X"],
+      output: out([bullet]),
+      fixtureKind: "weak",
+    });
+    expect(r.noResidualMarkdown).toBe(true);
+  });
+
+  it("is false on an errored row, via emptyRubricForError", () => {
+    expect(emptyRubricForError().noResidualMarkdown).toBe(false);
   });
 });
 

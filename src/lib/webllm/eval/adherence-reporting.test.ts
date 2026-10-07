@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import { runEval } from "./runner.ts";
 import { renderMarkdownReport } from "./report.ts";
 import { REWRITE_FIXTURES, getFixtureById } from "./fixtures.ts";
+import { aggregateTable, splitRow } from "./__test-utils__/aggregate-table.ts";
 import type { RewriteFn, RewriteFixture } from "./types.ts";
 
 const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
@@ -56,55 +57,6 @@ async function runOne(fixture: RewriteFixture, rewriteFn: RewriteFn) {
     rewriteFn,
     now: () => 0,
   });
-}
-
-/** `| a | b |` → `["", "a", "b", ""]`. Header and row split identically, so
- *  a column's index in one is its cell's index in the other. */
-function splitRow(line: string): string[] {
-  return line.split("|").map((c) => c.trim());
-}
-
-/**
- * The aggregate table, addressed BY COLUMN NAME.
- *
- * Matching a whole rendered row against a substring is what made the first
- * version of the two tests below unfalsifiable (#714 review): every other cell
- * in this run's row is `100%`, and `100%` contains `0%`, so a row whose
- * Steering cell had silently become `—` still matched `/0\.0%|0%/`. And `—`
- * appears in the Judge and Dedup cells of every report the judge is disabled
- * for — the default here — so `md.toContain("—")` was true of the probed report
- * too, i.e. of the exact output the sibling test says must NOT show one.
- *
- * Selecting the cell by its header index is the smallest fix that discriminates,
- * and it survives a column reorder in `report.ts` for free.
- *
- * `headerIdx + 2` is the first data row: `renderMarkdownReport` emits header,
- * separator, then one row per model × variant, and every run in this file is a
- * single model and a single variant.
- */
-function aggregateTable(md: string): {
-  header: string;
-  separator: string;
-  row: string;
-  cell: (column: string) => string;
-} {
-  const lines = md.split("\n");
-  const headerIdx = lines.findIndex((l) => l.startsWith("| Model | Variant |"));
-  if (headerIdx < 0) throw new Error(`no aggregate table in report:\n${md}`);
-  const header = lines[headerIdx]!;
-  const row = lines[headerIdx + 2]!;
-  const columns = splitRow(header);
-  const cells = splitRow(row);
-  return {
-    header,
-    separator: lines[headerIdx + 1]!,
-    row,
-    cell: (column) => {
-      const i = columns.indexOf(column);
-      if (i < 0) throw new Error(`no "${column}" column in: ${header}`);
-      return cells[i]!;
-    },
-  };
 }
 
 describe("the steering fixture is actually shipped", () => {

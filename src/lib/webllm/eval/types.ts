@@ -93,6 +93,14 @@ export interface RubricResult {
   /** Output contains none of the prompt-scaffolding echo phrases. */
   noPreambleLeak: boolean;
   /**
+   * No output bullet carries a paired `**…**` bold span (#805). All-or-
+   * nothing per record, over post-`cleanRewriteLine` text — the surface
+   * that reaches the user. `*`, `_`, backticks, `#`, a lone `**`, and
+   * unpaired asterisks do not count; see `RESIDUAL_BOLD_PATTERN` in
+   * `rubric.ts`.
+   */
+  noResidualMarkdown: boolean;
+  /**
    * For `redundant` fixtures: output bullet count < input bullet count.
    * `null` for non-redundant fixtures (the criterion does not apply).
    */
@@ -288,6 +296,8 @@ export interface AggregateRow {
   actionVerbRate: number;
   lengthSanityRate: number;
   noPreambleLeakRate: number;
+  /** 0..1 share of scored records with no residual `**…**` bold (#805). */
+  noResidualMarkdownRate: number;
   /** 0..1 across `redundant` fixtures only; `null` if none in the set. */
   dedupEffectiveRate: number | null;
   /** 0..1 across steering-probe fixtures only; `null` if none in the set.
