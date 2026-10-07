@@ -668,6 +668,236 @@ export function resolveBareLocationString(s: string): string | undefined {
   return isBare ? cleaned : undefined;
 }
 
+/**
+ * A US street-address line: a leading house number, then the street, then the
+ * locality, then an optional ZIP. `US_LOCATION_RE` is a plain substring
+ * matcher with no notion of an address around it, so run over a line like
+ * this it captures the street name as part of the city ("Main Street City,
+ * ST" out of "4567 Main Street City, ST 98052", #837). Detected here so the
+ * locality is taken from the address's own tail rather than from wherever the
+ * greedy 3-token run happens to start.
+ */
+const US_STREET_ADDRESS_RE = /^\s*\d+\s+\S/;
+
+/**
+ * Street-type word (or a bare unit marker `#`) that ends a street name and
+ * opens the locality on an address-shaped line: "4567 Main STREET City, ST"
+ * → everything after "Street" is the locality. Deliberately closed and not an
+ * attempt to parse the address in full — only to find where the street ends.
+ *
+ * The trailing `\s*,?\s+` admits BOTH shapes an address line draws: the
+ * street type running straight into the city with no punctuation ("Main
+ * Street City, ST") and the city set off from the street by its own comma
+ * ("123 Example Way, Springfield, IL") — the comma is optional, but at least
+ * one whitespace character after it (or after the word, when there is no
+ * comma) is required so the match can't land mid-word.
+ *
+ * "Circle", "Highway", "Parkway", "Trail", "Loop", "Square", "Crescent",
+ * "Pike", "Row" and "Walk" joined the original suffix list (PR #1126 review):
+ * a line ending in one of them ("4567 Main Circle City, ST 98052") used to
+ * fail {@link isAddressShapedLine} outright and fall through to the unguarded
+ * `US_LOCATION_RE` greedy match, reproducing #837's exact bug. Global (`g`)
+ * so {@link lastStreetTypeMatchEnd} can walk every occurrence in a line, not
+ * just the first — callers that only need the first match reset `lastIndex`
+ * before and after their own `exec`.
+ *
+ * The street-type word itself is captured (group 1, undefined for the bare
+ * `#` branch) so {@link lastStreetTypeMatchEnd} can tell a real suffix match
+ * apart from an abbreviated "St."/"Ste." that is actually "Saint" opening a
+ * place name ("St. Petersburg", "Ste. Anne") — see that function's
+ * `isSaintAbbreviation` guard.
+ */
+const STREET_TYPE_RE =
+  /(?:\b(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Suite|Apt|Circle|Cir|Highway|Hwy|Parkway|Pkwy|Trail|Loop|Square|Sq|Crescent|Pike|Row|Walk)\b\.?|#)\s*,?\s+/gi;
+
+/**
+ * True when `matchedWord` (group 1 of a `STREET_TYPE_RE` hit, ending right
+ * before `tailAfterMatch`) is SHAPED like an abbreviated "St."/"Ste." that
+ * could read as "Saint" rather than as the street-type word "Street"/
+ * "Suite" — i.e. it is followed by a capitalized word, the shape a place
+ * name takes ("St. Petersburg", "St. Louis", "Ste. Anne"). Spelled-out
+ * "Street"/"Suite" is never shaped this way and is excluded by the
+ * `/^ste?$/` test alone.
+ *
+ * Shape alone does not make it ambiguous, though — see
+ * {@link lastStreetTypeMatchEnd}, the only caller, for why: a LONE "St."/
+ * "Ste." match is the only closer the line has, so it must be the street
+ * suffix regardless of what follows it ("4567 Main St, Springfield, IL" —
+ * origin/main's own un-guarded reading, and the one a too-eager guard here
+ * regressed, PR #1126 follow-up). This predicate only answers "does this
+ * match look like it could be Saint"; the caller decides whether another
+ * match exists to make that reading safe to act on.
+ */
+function isSaintAbbreviation(matchedWord: string | undefined, tailAfterMatch: string): boolean {
+  return matchedWord !== undefined && /^ste?$/i.test(matchedWord) && /^[A-Z]/.test(tailAfterMatch);
+}
+
+/**
+ * End index of the LAST usable `STREET_TYPE_RE` match whose START precedes
+ * `text`'s first comma (or anywhere in the string, when there is none) — the
+ * boundary a street name carrying two street-type words needs. A line like
+ * "5 Avenue Road Toronto, ON" matches `STREET_TYPE_RE` at both "Avenue" and
+ * "Road"; cutting the tail after the FIRST match glues the second onto the
+ * locality ("Road Toronto, ON" instead of "Toronto, ON", PR #1126 review).
+ *
+ * An "St."/"Ste." match shaped like "Saint" (see {@link isSaintAbbreviation})
+ * is skipped as a candidate cut point ONLY when another, unambiguous
+ * street-type match exists in the line to serve as the real one — so a
+ * trailing "St. Petersburg" in "4567 Main Street St. Petersburg, FL" isn't
+ * mistaken for a second street-type word ahead of "Street", and a leading
+ * "St. Charles" in "123 St. Charles Avenue New Orleans, LA" isn't mistaken
+ * for the real street-type word when "Avenue" is (PR #1126 follow-up
+ * review). But nearly every city name is capitalized, so that same shape
+ * test fires on the ORDINARY "St" abbreviation too: "4567 Main St,
+ * Springfield, IL" has no second match to fall back on, and skipping its
+ * lone "St" unconditionally would drop `location` entirely — a working case
+ * turned into a regression (PR #1126 round 2). A lone "St"/"Ste" is never
+ * "Saint"; it is the only closer there is, so it must be trusted — UNLESS
+ * nothing but the house number precedes it ("100 St. Petersburg, FL"): a
+ * street suffix needs a street name to close, so there the lone "St." opens
+ * the city, and the returned cut is the match's START, keeping "St." in the
+ * tail (PR #1126 round 3).
+ *
+ * Filters by each match's START position rather than slicing the text before
+ * matching: `STREET_TYPE_RE`'s own trailing `\s*,?\s+` consumes the comma
+ * that sets a city off from its street ("Way**, **Springfield"), so handing
+ * it a region truncated AT that comma strands the match with nothing to
+ * close on and it fails outright — the exact regression a first attempt at
+ * this fix introduced (caught by `corpus.test.ts`'s baked snapshots, not by
+ * the hand-picked unit cases above, none of which happened to need a street
+ * word immediately before a comma). Scanning the full string and discarding
+ * only matches that START after the first comma gets the same "street words
+ * don't live in the locality tail" guard {@link isAddressShapedLine} applies,
+ * without truncating the text the regex itself still needs to close its own
+ * match against. Returns `undefined` when no qualifying street-type word is
+ * found at all.
+ */
+/** Nothing but a leading house number — the prefix a street-type word has
+ *  when no street name precedes it (see {@link lastStreetTypeMatchEnd}). */
+const HOUSE_NUMBER_ONLY_RE = /^\s*\d+\s*$/;
+
+function lastStreetTypeMatchEnd(text: string): number | undefined {
+  const firstComma = text.indexOf(",");
+  STREET_TYPE_RE.lastIndex = 0;
+  const matches: { start: number; end: number; isSaintShaped: boolean }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = STREET_TYPE_RE.exec(text)) !== null) {
+    if (firstComma !== -1 && m.index > firstComma) break;
+    const matchEnd = m.index + m[0].length;
+    matches.push({
+      start: m.index,
+      end: matchEnd,
+      isSaintShaped: isSaintAbbreviation(m[1], text.slice(matchEnd)),
+    });
+  }
+  STREET_TYPE_RE.lastIndex = 0;
+  if (matches.length === 1) {
+    const [lone] = matches;
+    // A suffix closes a street NAME, so a Saint-shaped "St."/"Ste." with only
+    // the house number before it has no name to close: it opens the place
+    // name instead ("100 St. Petersburg, FL"), and the tail starts AT it.
+    if (lone.isSaintShaped && HOUSE_NUMBER_ONLY_RE.test(text.slice(0, lone.start))) {
+      return lone.start;
+    }
+    // Otherwise a lone match is the only closer the line has — trust it even
+    // if it is "St"/"Ste"-shaped, since there is no other candidate to defer to.
+    return lone.end;
+  }
+  let end: number | undefined;
+  for (const match of matches) {
+    if (!match.isSaintShaped) end = match.end;
+  }
+  return end;
+}
+
+/**
+ * `US_STREET_ADDRESS_RE` alone matches any line that merely starts with a
+ * digit — a header tagline like "15 years of experience, Austin, TX" passes
+ * it despite carrying no address, and routing it into the address-only
+ * branch below loses `location` entirely (`extractLocalityFromAddressLine`
+ * finds no `STREET_TYPE_RE` word and returns `undefined`, with no
+ * document-wide fallback to recover it, #837). Require a street-type word
+ * too, so a numeric-leading non-address line falls through to the plain
+ * greedy match instead of being swallowed.
+ *
+ * A street-type word can also occur naturally far into an unrelated sentence
+ * ("5 Austin, TX natives founded Park Avenue Ventures") — `STREET_TYPE_RE`
+ * found "Avenue" there with no address in sight, which swallowed `location`
+ * the same way a bare `US_STREET_ADDRESS_RE` match once did. An address
+ * line's street-type word always precedes the comma that opens its locality,
+ * so require the match to land at or before the first comma; a street-type
+ * word appearing only after it is prose, not an address.
+ */
+export function isAddressShapedLine(text: string): boolean {
+  if (!US_STREET_ADDRESS_RE.test(text)) return false;
+  STREET_TYPE_RE.lastIndex = 0;
+  const streetMatch = STREET_TYPE_RE.exec(text);
+  STREET_TYPE_RE.lastIndex = 0;
+  if (!streetMatch) return false;
+  const firstComma = text.indexOf(",");
+  return firstComma === -1 || streetMatch.index <= firstComma;
+}
+
+/**
+ * One or more lowercase connectives that can open an international street
+ * name's tail right after its street-type word — "Pl **des** Vosges", "Pl
+ * **de la** Concorde", "Rue **von der** Vogelweide". `INTL_LOCATION_RE`
+ * requires a leading capital, so on a tail like "des Vosges, Paris 75004" it
+ * silently skips the lowercase "des" and matches starting at "Vosges"
+ * instead, mis-pairing that STREET-name fragment with the real city
+ * ("Vosges, Paris" instead of "Paris", PR #1126 review). A closed vocabulary
+ * of the connective words a street name actually uses — the same closed-list
+ * discipline as {@link HEADER_CONNECTOR_WORDS} above — strips a RUN of one or
+ * more connectives (not just one: "de la Concorde" is two, "van den Berg" is
+ * two) AND the capitalized word right after them (still the street name, not
+ * the locality) before the location regexes ever see the tail. A single
+ * trailing connective is not enough on its own — the original one-connective
+ * form left "la" unstripped ahead of "Concorde" in "de la Concorde", and the
+ * leftover lowercase "la" doesn't block `INTL_LOCATION_RE` from still
+ * matching "Concorde, Paris", the exact street-fragment leak this regex
+ * exists to prevent. Stripping can leave no comma-paired locality shape at
+ * all ("Paris 75004" alone, no state/region to pair with) — that resolves to
+ * `undefined` rather than a wrong answer, the same "missing beats wrong"
+ * trade {@link extractLocalityFromAddressLine} already makes.
+ */
+const STREET_NAME_CONNECTIVE_RE =
+  /^(?:(?:de|des|du|del|la|le|les|van|von|der|den|do|da)\s+)+[A-Z][A-Za-z.\-]*\s*/;
+
+function stripLeadingStreetConnective(tail: string): string {
+  return tail.replace(STREET_NAME_CONNECTIVE_RE, "");
+}
+
+/**
+ * Locality out of an address-shaped line's tail — the text after the LAST
+ * street-type word (see {@link lastStreetTypeMatchEnd}) — rather than the
+ * greedy `US_LOCATION_RE` match against the whole line, which would fold the
+ * street name into the city. Tries the two-letter-state shape first;
+ * `allowIntlFallback` additionally tries `INTL_LOCATION_RE`'s looser shape so
+ * a spelled-out state ("Springfield, California") or an international
+ * locality ("Bengaluru, India") in the tail still resolves —
+ * `INTL_LOCATION_RE` is a strict superset of `US_LOCATION_RE`'s pattern, so
+ * trying it second never overrides a correct two-letter-code match. The
+ * caller gates the fallback so an address line can't resolve via
+ * international shape before `extractLocation`'s plain-US pass has had a
+ * chance at every line (#837 follow-up — see there). Returns `undefined` when
+ * no street-type word is recognized, or the tail carries no recognizable
+ * locality shape at all: a missing `location` costs a little score
+ * completeness, a wrong one is printed on the user's exported résumé (#837).
+ */
+export function extractLocalityFromAddressLine(
+  text: string,
+  allowIntlFallback: boolean,
+): string | undefined {
+  const tailStart = lastStreetTypeMatchEnd(text);
+  if (tailStart === undefined) return undefined;
+  const tail = stripLeadingStreetConnective(text.slice(tailStart));
+  const us = US_LOCATION_RE.exec(tail);
+  if (us) return us[0];
+  if (!allowIntlFallback) return undefined;
+  const intl = INTL_LOCATION_RE.exec(tail);
+  return intl && !/@/.test(intl[0]) ? intl[0] : undefined;
+}
+
 /** Collapse internal whitespace and trim — the canonical date-token normalizer. */
 export function normalizeDate(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();

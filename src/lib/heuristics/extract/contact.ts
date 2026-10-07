@@ -20,6 +20,10 @@ import {
   INTL_LOCATION_RE,
 } from "../regex.ts";
 import { escapeRegex } from "../../jd-match/regex-utils.ts";
+import {
+  isAddressShapedLine,
+  extractLocalityFromAddressLine,
+} from "../line-primitives.ts";
 import { findFirstPhone, regionFromLocation } from "../phone.ts";
 import { firstMatch, allMatches, isStandaloneUrl } from "./shared.ts";
 import {
@@ -292,15 +296,30 @@ const PORTFOLIO_WEBSITE_BAND_TO_PROFILE = true;
  * see the doc-comment on `extractContact` for the reasoning.
  */
 function extractLocation(lines: PdfLine[]): string | undefined {
-  for (const line of lines) {
-    const us = US_LOCATION_RE.exec(line.text);
-    if (us) return us[0];
-  }
-  for (const line of lines) {
-    const intl = INTL_LOCATION_RE.exec(line.text);
-    if (intl && !/@/.test(intl[0])) return intl[0];
+  // Two passes, US first: an international match on one line must not resolve
+  // before a later plain "City, ST" line ever gets a US-pass look, inverting
+  // the US-before-international priority this function documents.
+  for (const allowIntl of [false, true]) {
+    for (const line of lines) {
+      const location = locationOnLine(line.text, allowIntl);
+      if (location) return location;
+    }
   }
   return undefined;
+}
+
+/**
+ * One line's location candidate for one pass of {@link extractLocation}. An
+ * address-shaped line yields the locality from its own tail or nothing — never
+ * the greedy whole-line match, which is exactly the junk-substring bug the
+ * tail extraction guards against (#837). Any other line gets the whole-line
+ * match: `US_LOCATION_RE` on the US pass, `INTL_LOCATION_RE` on the
+ * international one.
+ */
+function locationOnLine(text: string, allowIntl: boolean): string | undefined {
+  if (isAddressShapedLine(text)) return extractLocalityFromAddressLine(text, allowIntl);
+  const match = (allowIntl ? INTL_LOCATION_RE : US_LOCATION_RE).exec(text);
+  return match && !/@/.test(match[0]) ? match[0] : undefined;
 }
 
 /** TLDs we accept on a *scheme-less* bare-domain website/portfolio candidate.
