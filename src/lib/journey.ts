@@ -26,10 +26,16 @@
  *
  * Two derivation rules that a future reader will otherwise "fix":
  *
- *  1. **`download` is never `current`.** It is the terminal ACTION, not a place
- *     you sit — a user who has exported is still on `Fix it` (or `Tailor`),
- *     free to edit and export again. Marking it current the moment an export
- *     happened would make the rail claim the journey ended.
+ *  1. **`download` is `current` only on the `/download/` entry, never because
+ *     an export happened.** Download moved off `/` onto its own HTML entry
+ *     (#1180); standing on that page IS the one unconditional claim the arc
+ *     makes for it, the same way `/jobs/` is unconditionally `match` (see the
+ *     comment on `current`'s derivation below). But exporting itself does not
+ *     relocate anyone: a user who downloaded from `/` before #1180, or who
+ *     returns to `/` after visiting `/download/`, is still on `Fix it` (or
+ *     `Tailor`), free to edit and export again — `completed.download` (#826,
+ *     rule 4 below) is the "has exported" fact, and it is tracked entirely
+ *     separately from `current`.
  *  2. **`add` is always reachable, and its availability still tracks the
  *     résumé.** The two are different questions. Reachability is "may the user
  *     click here" — always yes for the first stage, which has no earlier step
@@ -52,7 +58,7 @@
 export type JourneyStageId = "add" | "fix" | "match" | "tailor" | "download";
 
 /** Which HTML entry the rail is rendering on. */
-export type JourneyEntry = "root" | "jobs";
+export type JourneyEntry = "root" | "jobs" | "download";
 
 /** What the rail shows when a stage has nothing behind it yet. */
 export interface JourneyStageEmptyState {
@@ -162,7 +168,10 @@ export const JOURNEY_STAGES: readonly JourneyStage[] = [
  * button that starts it is on screen, and on `/` while a JD is actually
  * steering the rewrite — which is the one moment `Tailor` is the current
  * stage. Everywhere else the arc is four stages, and nothing is hidden that
- * the user could have acted on.
+ * the user could have acted on. `/download/` (#1180) has no such button
+ * either, so it falls through to the same `entry === "jobs" || jdSteering`
+ * check as `/` and reads `false` by construction — `jdSteering` is a signal
+ * about the résumé's edit lane, which `/download/` doesn't host.
  */
 function isStageVisible(
   id: JourneyStageId,
@@ -218,7 +227,8 @@ export interface JourneySignals {
 }
 
 export interface Journey {
-  /** The one stage the user is on. Never `download` — see the module docblock. */
+  /** The one stage the user is on. `download` only on the `/download/` entry,
+   *  never because an export happened elsewhere — see module docblock rule 1. */
   current: JourneyStageId;
   /** Per stage: is there data behind it? Drives the rail's "ready" state and
    *  whether a click lands on content or on the guidance card. Keyed by EVERY
@@ -303,21 +313,27 @@ export function deriveJourney({
     download: hasResume && completed.download === true,
   };
 
-  // `/jobs/` IS the Match-jobs stage, whether or not a résumé reached it — a
-  // user standing on the search surface with nothing to search against is
-  // still standing there, and the surface says so in its own empty state.
+  // `/jobs/` IS the Match-jobs stage and `/download/` IS the Download stage,
+  // whether or not a résumé reached either — a user standing on the search or
+  // export surface with nothing behind it yet is still standing there, and
+  // the surface says so in its own empty state. See module docblock rule 1
+  // for why this does NOT make `completed.download` (an export having
+  // happened) imply `current === "download"` on `/` — the two are unrelated.
   //
-  // `hasResume`, never `anyResume`: a saved résumé the user has not opened is
-  // not a place they are standing. Widening this to the library would put
-  // `current: "fix"` on a cold `/` whose body is the drop zone.
+  // `hasResume`, never `anyResume`, on the `add`/`fix`/`tailor` branch below:
+  // a saved résumé the user has not opened is not a place they are standing.
+  // Widening this to the library would put `current: "fix"` on a cold `/`
+  // whose body is the drop zone.
   const current: JourneyStageId =
     entry === "jobs"
       ? "match"
-      : !hasResume
-        ? "add"
-        : jdSteering
-          ? "tailor"
-          : "fix";
+      : entry === "download"
+        ? "download"
+        : !hasResume
+          ? "add"
+          : jdSteering
+            ? "tailor"
+            : "fix";
 
   return {
     current,
