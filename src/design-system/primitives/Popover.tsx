@@ -8,7 +8,9 @@
  * `Dialog` is the ONE modal primitive: it traps focus, dims the page, and
  * demands a decision. A Popover is quieter — an explainer, a hint, a bit of
  * "why does this number look like that" prose that the user can dismiss by
- * clicking away without it ever having taken over the page. Reaching for
+ * clicking away without it ever having taken over the page. (Below `sm` the
+ * panel becomes a bottom sheet over a tap-to-dismiss scrim (#971) — visual
+ * only: still no focus trap, still no decision demanded.) Reaching for
  * `Dialog` for that case (as `AtsScoreReadout`'s old `<details>` block half-did)
  * either over-escalates a footnote into a modal, or under-escalates into a
  * bespoke `useState` + click-outside listener re-rolled at every callsite.
@@ -38,8 +40,8 @@ import type { ReactNode } from "react";
 import { Button, type ButtonVariant } from "./Button.tsx";
 
 // Panel chrome mirrors `Dialog.tsx`'s CHROME constant (radius/border/bg/
-// shadow/text), minus the modal-only backdrop rules — a Popover never dims
-// the page. `absolute` + `z-20` + `mt-1` positions it under the trigger, the
+// shadow/text), minus the modal-only backdrop rules — above `sm` a Popover
+// never dims the page (below it, see `SCRIM`). `absolute` + `z-20` + `mt-1` positions it under the trigger, the
 // same convention `AchievementTypePicker`'s menu uses.
 //
 // `w-72` is the preferred width and the `max-w` clamp BOUNDS THAT WIDTH — it
@@ -104,8 +106,39 @@ import { Button, type ButtonVariant } from "./Button.tsx";
 // `backdrop-blur` and exposes `headerExtra`, so a `Popover` placed there would
 // anchor to the header, not the viewport. The containment e2e cannot catch
 // this: a header-anchored sheet still passes every on-screen bound it checks.
+//
+// `max-sm:overflow-x-hidden` + `break-words` (#971): CSS coerces a `visible`
+// axis to `auto` when the OTHER axis is not `visible`, so `overflow-y-auto`
+// alone silently makes `overflow-x` resolve to `auto` too — a future caller
+// with a long unbreakable string would get a horizontal scrollbar inside the
+// sheet instead of a wrap. `break-words` is unprefixed (not `max-sm:`-gated),
+// as #971 specifies, so it applies at every width: above `sm` it makes an
+// unbreakably-long word wrap inside the fixed `w-72` panel instead of running
+// past its edge. No overflow class is added above `sm`.
 const PANEL_BASE =
-  "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:bottom-4 max-sm:w-auto max-sm:max-h-[calc(100vh-2rem)] max-sm:overflow-y-auto";
+  "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg break-words max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:bottom-4 max-sm:w-auto max-sm:max-h-[calc(100vh-2rem)] max-sm:overflow-y-auto max-sm:overflow-x-hidden";
+
+// The below-`sm` scrim (#971): a non-modal panel pinned to the viewport reads
+// as a stray overlay rather than a layer, and — measured at 375px — it can
+// occlude unrelated controls with nothing telling the user a layer is open.
+// `hidden max-sm:block` keeps it out of the DOM's rendered box (and out of
+// EVERY breakpoint above `sm`, where the panel stays trigger-anchored and
+// nothing about this primitive changes) until the narrow breakpoint turns it
+// back on; `max-sm:fixed max-sm:inset-0` then covers the viewport the same
+// way `PANEL_BASE`'s `max-sm:fixed` does, and the same containing-block
+// caveat documented above applies to both. `z-10` sits below the panel's
+// `z-20` — scrim, then sheet, same order a modal paints in. The token mirrors
+// `Dialog.tsx`'s `CHROME` (`backdrop:bg-content-primary/40
+// backdrop:backdrop-blur-sm`) rather than inventing a second dim value: same
+// visual weight, just on a plain element instead of `::backdrop`, since this
+// primitive renders no `<dialog>`.
+//
+// `aria-hidden` + no `tabIndex`: the scrim is decorative and tap-to-dismiss
+// only, never a focus stop and never announced — `Popover` stays non-modal
+// semantically (no trap, `role="dialog"`/`menu` only), so nothing here should
+// make it read as one to assistive tech.
+const SCRIM =
+  "hidden max-sm:block max-sm:fixed max-sm:inset-0 max-sm:z-10 max-sm:bg-content-primary/40 max-sm:backdrop-blur-sm";
 
 /** Which of the trigger's edges the panel is anchored to. */
 const PANEL_ALIGN = { start: "left-0", end: "right-0" } as const;
@@ -208,6 +241,11 @@ export function Popover({
   // focus, so leaving it any other way would strand it open over the page.
   // This is the single copy of the listener both callers share.
   //
+  // The below-`sm` scrim (#971) dismisses through its OWN `onClick`, not
+  // through this listener: the scrim is a child of `rootRef`, so a tap on it
+  // never satisfies this handler's `!contains` check and `close()` never
+  // double-fires for the same tap.
+  //
   // Escape is marked handled (`preventDefault`): the keydown keeps bubbling to
   // `window`, where a page-level listener — Fix It's dock (#810) — reads an
   // unclaimed Escape as its own and would exit too (#1001).
@@ -247,16 +285,19 @@ export function Popover({
       </Button>
 
       {open && (
-        <div
-          ref={panelRef}
-          id={panelId}
-          role={role}
-          aria-label={panelLabel ?? label}
-          tabIndex={-1}
-          className={panelCls}
-        >
-          {typeof children === "function" ? children({ close }) : children}
-        </div>
+        <>
+          <div aria-hidden="true" onClick={close} className={SCRIM} />
+          <div
+            ref={panelRef}
+            id={panelId}
+            role={role}
+            aria-label={panelLabel ?? label}
+            tabIndex={-1}
+            className={panelCls}
+          >
+            {typeof children === "function" ? children({ close }) : children}
+          </div>
+        </>
       )}
     </div>
   );

@@ -230,6 +230,11 @@ describe("Popover", () => {
     // `bottom` anchor grows upward off-screen with nothing scrollable.
     expect(panel.className).toContain("max-sm:max-h-[calc(100vh-2rem)]");
     expect(panel.className).toContain("max-sm:overflow-y-auto");
+    // #971: `overflow-y-auto` alone coerces the other axis to `auto` too, so
+    // a long unbreakable string would get a horizontal scrollbar instead of
+    // wrapping without this.
+    expect(panel.className).toContain("max-sm:overflow-x-hidden");
+    expect(panel.className).toContain("break-words");
   }
 
   it("carries the below-sm viewport-pinning override when aligned to start", () => {
@@ -261,6 +266,80 @@ describe("Popover", () => {
     act(() => {
       panel.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     });
+    expect(el.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  // The below-`sm` scrim (#971). jsdom has no layout engine, so these pin
+  // only the a11y/dismiss CONTRACT — that the scrim exists, is inert to
+  // assistive tech, and closes the panel on tap. Whether it actually renders
+  // only below `sm` and covers the viewport is a real-browser question,
+  // same split as `expectViewportPinned` above — see
+  // `e2e/mobile/popover-containment.spec.ts`.
+  //
+  // Located structurally — the panel's preceding sibling, where `Popover.tsx`
+  // renders it — not by `[aria-hidden]`, which a caller's trigger icon also
+  // carries (`AchievementTypePicker`).
+  function scrim(el: HTMLElement): HTMLElement {
+    const node = el.querySelector('[role="dialog"]')?.previousElementSibling;
+    if (!(node instanceof HTMLElement) || node.tagName === "BUTTON") {
+      throw new Error("no scrim rendered");
+    }
+    return node;
+  }
+
+  /** The root's children: just the trigger while closed, no scrim beside it. */
+  function rootChildren(el: HTMLElement): number {
+    return el.firstElementChild?.children.length ?? 0;
+  }
+
+  it("renders no scrim while closed", () => {
+    const el = render();
+    expect(rootChildren(el)).toBe(1);
+  });
+
+  it("renders a scrim while open, scoped to the max-sm breakpoint and inert to assistive tech", () => {
+    const el = render();
+    act(() => trigger(el).click());
+    const node = scrim(el);
+    expect(node.getAttribute("aria-hidden")).toBe("true");
+    expect(node.className).toContain("hidden");
+    expect(node.className).toContain("max-sm:block");
+    expect(node.className).toContain("max-sm:fixed");
+    expect(node.className).toContain("max-sm:inset-0");
+    // Not a focus stop: no tabIndex, so it never joins the tab order.
+    expect(node.getAttribute("tabindex")).toBeNull();
+  });
+
+  it("closes the popover and returns focus to the trigger when the scrim is tapped", () => {
+    const el = render();
+    act(() => trigger(el).click());
+    expect(el.querySelector('[role="dialog"]')).not.toBeNull();
+
+    act(() => {
+      scrim(el).click();
+    });
+    expect(el.querySelector('[role="dialog"]')).toBeNull();
+    expect(rootChildren(el)).toBe(1);
+    expect(document.activeElement).toBe(trigger(el));
+  });
+
+  it("leaves the outside-click listener out of a scrim tap: a bare mousedown on the scrim does not close", () => {
+    // The outside-click listener (above) is on `document` and fires on
+    // `mousedown`, which a real tap also dispatches. The scrim is a CHILD of
+    // the root, so that listener's `!rootRef.current.contains(target)` check
+    // is false for it and only the scrim's own `onClick` runs `close()` —
+    // one dismiss path per tap, not two races to the same state update.
+    const el = render();
+    act(() => trigger(el).click());
+    const node = scrim(el);
+
+    act(() => {
+      node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    // The document-level outside-click handler treats the scrim as INSIDE
+    // the root, so a bare mousedown on it must not close the panel by
+    // itself — only the scrim's own click handler does that (asserted
+    // above).
     expect(el.querySelector('[role="dialog"]')).not.toBeNull();
   });
 });
