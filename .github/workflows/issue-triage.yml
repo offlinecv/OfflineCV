@@ -6,10 +6,14 @@
 #   ready-for-agent      → clear; gets a type label. If the author has write
 #                          access, `gaal` is added too, which starts
 #                          gaal-agent.yml (issue → PR) — unless the issue
-#                          has an assignee, an open blocked-by dependency or
-#                          the `needs-human` label, read at handoff time. It
-#                          still gets `ready-for-agent`. Dependencies added
-#                          after triage runs (~1 min after filing) are not seen.
+#                          has the `status:claimed` label, an open blocked-by
+#                          dependency, sub-issues (an epic) or the
+#                          `needs-human` label, read at handoff time. It
+#                          still gets `ready-for-agent`. An assignee does not
+#                          opt out: assignment says who reviews (see
+#                          gaal-agent.yml). Dependencies, sub-issues or claims
+#                          added after triage runs (~1 min after filing) are
+#                          not seen.
 #   needs-clarification  → a `**Triage** —` comment asks the author; their
 #                          reply (or an edit to the issue) re-runs triage.
 #   duplicate            → labelled + linked, never closed by the bot.
@@ -210,21 +214,27 @@ jobs:
           [ "$AUTO_GAAL" = false ] && exit 0
 
           # Opt-outs, read now rather than from the event payload. An API error
-          # fails the run rather than reading as "no assignee / no blockers".
+          # fails the run rather than reading as "no blockers / no sub-issues".
           issue=$(gh api "repos/$REPO/issues/$NUMBER") \
             || { echo "::error::could not read issue #$NUMBER"; exit 1; }
-          blockers=$(gh api "repos/$REPO/issues/$NUMBER/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length') \
-            || { echo "::error::could not read #$NUMBER's dependencies"; exit 1; }
-          if [ "$(jq '.assignees | length' <<<"$issue")" -gt 0 ]; then
-            echo "Issue #$NUMBER has an assignee; leaving gaal for a maintainer to add."
-            exit 0
-          fi
-          if [ "$blockers" -gt 0 ]; then
-            echo "Issue #$NUMBER has $blockers open blocked-by dependencies; leaving gaal for a maintainer to add."
+          if jq -e 'any(.labels[]; .name == "status:claimed")' <<<"$issue" >/dev/null; then
+            echo "Issue #$NUMBER is claimed (status:claimed); leaving gaal for a maintainer to add."
             exit 0
           fi
           if jq -e 'any(.labels[]; .name == "needs-human")' <<<"$issue" >/dev/null; then
             echo "Issue #$NUMBER is labelled needs-human; leaving gaal for a maintainer to add."
+            exit 0
+          fi
+          blockers=$(gh api "repos/$REPO/issues/$NUMBER/dependencies/blocked_by" --jq '[.[] | select(.state == "open")] | length') \
+            || { echo "::error::could not read #$NUMBER's dependencies"; exit 1; }
+          if [ "$blockers" -gt 0 ]; then
+            echo "Issue #$NUMBER has $blockers open blocked-by dependencies; leaving gaal for a maintainer to add."
+            exit 0
+          fi
+          subissues=$(gh api "repos/$REPO/issues/$NUMBER/sub_issues" --jq length) \
+            || { echo "::error::could not read #$NUMBER's sub-issues"; exit 1; }
+          if [ "$subissues" -gt 0 ]; then
+            echo "Issue #$NUMBER is an epic (has sub-issues); leaving gaal for a maintainer to add."
             exit 0
           fi
 

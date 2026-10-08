@@ -188,10 +188,13 @@ assignee alone is not enough: `gh issue list` prints labels and not assignees,
 and on the web list the assignee is a small avatar in the right margin.
 Contributors — and tooling that scans the backlog — read the label.
 
-**If you have write access and assign yourself, add `status:claimed` too.**
-Self-assignment skips the maintainer step that would normally attach the label,
-and an assignee on its own is exactly the invisible claim described above — it
-is how #681 got built twice.
+**If you have write access and assign yourself, add `status:claimed` in the
+same action — not as a follow-up.** Self-assignment skips the maintainer step
+that would normally attach the label, and an assignee on its own is exactly
+the invisible claim described above — it is how #681 got built twice. The
+triage automation that hands issues to Gaal reads the label once, at filing
+time, and nothing re-checks it before a build starts, so a gap between
+assigning and labelling is no longer human-speed.
 
 Claims lapse. If a claimed issue goes **7 days** with no linked PR and no
 activity, a scheduled job
