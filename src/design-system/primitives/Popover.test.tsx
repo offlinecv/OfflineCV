@@ -275,21 +275,33 @@ describe("Popover", () => {
   // only below `sm` and covers the viewport is a real-browser question,
   // same split as `expectViewportPinned` above — see
   // `e2e/mobile/popover-containment.spec.ts`.
+  //
+  // Located structurally — the panel's preceding sibling, where `Popover.tsx`
+  // renders it — not by `[aria-hidden]`, which a caller's trigger icon also
+  // carries (`AchievementTypePicker`).
   function scrim(el: HTMLElement): HTMLElement {
-    const node = el.querySelector<HTMLElement>('[aria-hidden="true"]');
-    if (!node) throw new Error("no scrim rendered");
+    const node = el.querySelector('[role="dialog"]')?.previousElementSibling;
+    if (!(node instanceof HTMLElement) || node.tagName === "BUTTON") {
+      throw new Error("no scrim rendered");
+    }
     return node;
+  }
+
+  /** The root's children: just the trigger while closed, no scrim beside it. */
+  function rootChildren(el: HTMLElement): number {
+    return el.firstElementChild?.children.length ?? 0;
   }
 
   it("renders no scrim while closed", () => {
     const el = render();
-    expect(el.querySelector('[aria-hidden="true"]')).toBeNull();
+    expect(rootChildren(el)).toBe(1);
   });
 
   it("renders a scrim while open, scoped to the max-sm breakpoint and inert to assistive tech", () => {
     const el = render();
     act(() => trigger(el).click());
     const node = scrim(el);
+    expect(node.getAttribute("aria-hidden")).toBe("true");
     expect(node.className).toContain("hidden");
     expect(node.className).toContain("max-sm:block");
     expect(node.className).toContain("max-sm:fixed");
@@ -307,11 +319,11 @@ describe("Popover", () => {
       scrim(el).click();
     });
     expect(el.querySelector('[role="dialog"]')).toBeNull();
-    expect(el.querySelector('[aria-hidden="true"]')).toBeNull();
+    expect(rootChildren(el)).toBe(1);
     expect(document.activeElement).toBe(trigger(el));
   });
 
-  it("does not double-fire when the scrim tap also bubbles a mousedown to the document", () => {
+  it("leaves the outside-click listener out of a scrim tap: a bare mousedown on the scrim does not close", () => {
     // The outside-click listener (above) is on `document` and fires on
     // `mousedown`, which a real tap also dispatches. The scrim is a CHILD of
     // the root, so that listener's `!rootRef.current.contains(target)` check

@@ -8,7 +8,9 @@
  * `Dialog` is the ONE modal primitive: it traps focus, dims the page, and
  * demands a decision. A Popover is quieter — an explainer, a hint, a bit of
  * "why does this number look like that" prose that the user can dismiss by
- * clicking away without it ever having taken over the page. Reaching for
+ * clicking away without it ever having taken over the page. (Below `sm` the
+ * panel becomes a bottom sheet over a tap-to-dismiss scrim (#971) — visual
+ * only: still no focus trap, still no decision demanded.) Reaching for
  * `Dialog` for that case (as `AtsScoreReadout`'s old `<details>` block half-did)
  * either over-escalates a footnote into a modal, or under-escalates into a
  * bespoke `useState` + click-outside listener re-rolled at every callsite.
@@ -38,8 +40,8 @@ import type { ReactNode } from "react";
 import { Button, type ButtonVariant } from "./Button.tsx";
 
 // Panel chrome mirrors `Dialog.tsx`'s CHROME constant (radius/border/bg/
-// shadow/text), minus the modal-only backdrop rules — a Popover never dims
-// the page. `absolute` + `z-20` + `mt-1` positions it under the trigger, the
+// shadow/text), minus the modal-only backdrop rules — above `sm` a Popover
+// never dims the page (below it, see `SCRIM`). `absolute` + `z-20` + `mt-1` positions it under the trigger, the
 // same convention `AchievementTypePicker`'s menu uses.
 //
 // `w-72` is the preferred width and the `max-w` clamp BOUNDS THAT WIDTH — it
@@ -109,10 +111,10 @@ import { Button, type ButtonVariant } from "./Button.tsx";
 // axis to `auto` when the OTHER axis is not `visible`, so `overflow-y-auto`
 // alone silently makes `overflow-x` resolve to `auto` too — a future caller
 // with a long unbreakable string would get a horizontal scrollbar inside the
-// sheet instead of a wrap. `break-words` is unprefixed (not `max-sm:`-gated)
-// because it only changes how an unbreakably-long word WRAPS, never whether
-// one appears, so it has no effect above `sm`, where the panel is anchored to
-// the trigger rather than sized to the viewport.
+// sheet instead of a wrap. `break-words` is unprefixed (not `max-sm:`-gated),
+// as #971 specifies, so it applies at every width: above `sm` it makes an
+// unbreakably-long word wrap inside the fixed `w-72` panel instead of running
+// past its edge. No overflow class is added above `sm`.
 const PANEL_BASE =
   "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg break-words max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:bottom-4 max-sm:w-auto max-sm:max-h-[calc(100vh-2rem)] max-sm:overflow-y-auto max-sm:overflow-x-hidden";
 
