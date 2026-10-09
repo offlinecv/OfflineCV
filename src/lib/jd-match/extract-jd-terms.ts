@@ -14,7 +14,10 @@
  * Both passes ignore boilerplate sections (EEO, benefits, legal disclaimers).
  * The anchor list below is the full set of phrases we use to detect those
  * sections — match an anchor anywhere on a line and we skip that line plus
- * everything up to a blank line or another anchor.
+ * everything up to a blank line or a line that itself carries a known skill
+ * (#1187) — a skill mention is treated as the requirements block resuming,
+ * since JDs pasted from a PDF often run a salary/visa line straight into the
+ * next paragraph with no blank line between them.
  *
  * For each extracted term we record a short snippet (~80 chars) showing
  * where in the JD it surfaced. The UI hovers that snippet so a user can
@@ -22,6 +25,11 @@
  */
 
 import { getSkillIndex } from "./skills.ts";
+import {
+  ALIAS_BOUNDARY_PREFIX,
+  ALIAS_BOUNDARY_SUFFIX,
+  escapeRegex,
+} from "./regex-utils.ts";
 
 /**
  * Anchor phrases (lowercased, normalized whitespace) that mark the start of
@@ -462,29 +470,34 @@ export function extractJdTerms(
 
 /**
  * Walk the JD line by line. A line that contains a boilerplate anchor is
- * dropped, along with the run of non-blank lines that follow (we treat a
- * blank line as the end of a boilerplate block).
+ * dropped, along with the run of non-blank lines that follow, until either a
+ * blank line or a line carrying a known dictionary skill ends the block
+ * (#1187). The skill check also applies to the anchor-hitting line itself, so
+ * a line that mixes an anchor with a real requirement in the same breath
+ * ("We are unable to sponsor visas. Must have Python and Kubernetes
+ * experience.") keeps its requirement half instead of losing it with the
+ * boilerplate.
  *
- * Tradeoff: matching is line-granular, so a line that mixes an anchor
- * with real skill copy (e.g. "Salary range: $100k. We use Rust and Go.")
- * is over-stripped — the real skills are lost with the boilerplate. Rare
- * in practice (anchors usually live on their own line or start a block),
- * and worth the simplicity for v1. A sentence-granular pass would fix
- * this if it shows up in real JDs.
+ * Why a skill mention and not a bullet marker: benefits/perks blocks are
+ * routinely bulleted too ("- 401(k) match", "- Unlimited PTO"), so a bare
+ * bullet would end the block early and let those lines leak back in. A
+ * curated-dictionary skill hit is a much stronger signal that the block has
+ * moved on to a real requirement.
+ *
+ * Remaining tradeoff: a requirements line with no recognized skill alias
+ * (e.g. "Must have 5+ years of experience") directly below an anchor, with no
+ * blank line between them, is still dropped — there is no cheap way to tell
+ * it apart from a continuing boilerplate sentence without a skill to anchor
+ * on. Worth fixing if it shows up in real JDs; out of scope here.
  */
 export function stripBoilerplate(raw: string): string {
   const normalized = raw.replace(/\r\n?/g, "\n");
   const lines = normalized.split("\n");
   const kept: string[] = [];
   let skipping = false;
+  const skillPattern = getSkillPatternForLineScan();
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    const lower = line.toLowerCase().replace(/\s+/g, " ");
-    const hitsAnchor = BOILERPLATE_ANCHORS.some((a) => lower.includes(a));
-    if (hitsAnchor) {
-      skipping = true;
-      continue;
-    }
     if (line === "") {
       // A blank line ends any active boilerplate block, and is itself kept
       // so paragraph boundaries survive into the matched body.
@@ -492,11 +505,84 @@ export function stripBoilerplate(raw: string): string {
       kept.push("");
       continue;
     }
-    if (skipping) continue;
+    if (skipping) {
+      if (carriesKnownSkill(line, skillPattern)) {
+        skipping = false;
+        kept.push(rawLine);
+      }
+      continue;
+    }
+    const lower = line.toLowerCase().replace(/\s+/g, " ");
+    const hitsAnchor = BOILERPLATE_ANCHORS.some((a) => lower.includes(a));
+    if (hitsAnchor) {
+      // The anchor line itself still arms the skip, even when it carries a
+      // real requirement in the same breath — only the line's own text is
+      // exempted, not the paragraph after it. Arming unconditionally is what
+      // keeps a skill-free anchor+skill line ("equal opportunity employer
+      // and value Python expertise") from leaving the rest of the
+      // boilerplate paragraph to leak through untouched.
+      skipping = true;
+      if (!carriesKnownSkill(line, skillPattern)) {
+        continue;
+      }
+    }
     kept.push(rawLine);
   }
   // Collapse 3+ blank lines down to one to keep snippets tidy.
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * Bare single-word skill aliases that double as ordinary English words
+ * found in EEO/benefits prose: "swift" (handling), "express" (written
+ * consent), "spark" (joy), "git" (British slang), "react" (verb), "rust"
+ * (corrosion), "notion" (idea). A bare hit on one of these is too weak a
+ * signal to end — or exempt the anchor line itself from — a boilerplate
+ * skip: "committed to the swift handling of accommodation requests" matched
+ * the Swift-language alias and kept the whole EEO paragraph (#1188).
+ *
+ * Scoped to the line-scan pattern only. `extractSkillPass`'s main pass still
+ * credits a genuine mention of one of these languages/tools elsewhere in the
+ * JD — this list only disarms them as boilerplate-block terminators. A
+ * multi-word or punctuated alias for the same skill ("react native",
+ * "apache spark", "express.js") is unambiguous and stays eligible.
+ */
+const AMBIGUOUS_ANCHOR_SKILL_ALIASES = new Set<string>([
+  "swift",
+  "express",
+  "spark",
+  "git",
+  "react",
+  "rust",
+  "notion",
+]);
+
+let lineScanPatternCache: RegExp | null = null;
+
+/** The skill index's match pattern, minus the bare ambiguous aliases above
+ *  (which this scan must not treat as ending a boilerplate block). Compiled
+ *  once and cached at module scope, same as {@link getSkillIndex} — safe to
+ *  share because {@link carriesKnownSkill} resets `lastIndex` before every
+ *  `.test()` call, so no caller can observe another's scan position. */
+function getSkillPatternForLineScan(): RegExp {
+  if (lineScanPatternCache) return lineScanPatternCache;
+  const index = getSkillIndex();
+  const aliases = Array.from(index.aliasToId.keys())
+    .filter((alias) => !AMBIGUOUS_ANCHOR_SKILL_ALIASES.has(alias))
+    .sort((a, b) => b.length - a.length);
+  const body = aliases.map(escapeRegex).join("|");
+  lineScanPatternCache = new RegExp(
+    `${ALIAS_BOUNDARY_PREFIX}(${body})${ALIAS_BOUNDARY_SUFFIX}`,
+    "gi",
+  );
+  return lineScanPatternCache;
+}
+
+/** True when `line` contains a known dictionary skill alias — the signal
+ *  {@link stripBoilerplate} uses to decide a boilerplate block has ended. */
+function carriesKnownSkill(line: string, skillPattern: RegExp): boolean {
+  skillPattern.lastIndex = 0;
+  return skillPattern.test(line);
 }
 
 /**

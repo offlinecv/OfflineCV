@@ -48,6 +48,66 @@ describe("stripBoilerplate", () => {
     expect(body).toContain("Postgres");
     expect(body).toContain("Airflow");
   });
+
+  it("keeps a requirement that sits directly below a boilerplate line with no blank line between them (#1187)", () => {
+    // The anchor-hitting line itself carries the real requirement: dropping
+    // the whole line, as the old blank-line-only terminator did, lost
+    // "Python and Kubernetes" along with the salary/visa boilerplate.
+    const jd =
+      "Salary range: $100k-$150k.\n" +
+      "We are unable to sponsor visas. Must have Python and Kubernetes experience.";
+    const body = stripBoilerplate(jd);
+    expect(body).toContain("Python");
+    expect(body).toContain("Kubernetes");
+    expect(body.toLowerCase()).not.toContain("salary range");
+  });
+
+  it("still drops a multi-line EEO/benefits paragraph whole when none of its lines carry a known skill (#1187)", () => {
+    const jd =
+      "We are an equal opportunity employer.\n" +
+      "We celebrate diversity and are committed to creating\n" +
+      "an inclusive environment for all employees without regard to race,\n" +
+      "color, religion, sex, national origin, or disability status.";
+    const body = stripBoilerplate(jd);
+    expect(body).toBe("");
+  });
+
+  it("does not let an incidental English-word skill alias in the anchor line keep the whole EEO block (#1188)", () => {
+    // "swift" here is the adjective, not the language — the EEO/accommodation
+    // paragraph has no real requirement in it and should be dropped whole,
+    // same as any other EEO block.
+    const jd =
+      "We are an equal opportunity employer committed to the swift handling " +
+      "of accommodation requests.\n" +
+      "We do not discriminate on the basis of race, color, religion, sex, " +
+      "national origin, disability, or veteran status.\n" +
+      "All qualified applicants will receive consideration for employment.";
+    const body = stripBoilerplate(jd);
+    expect(body).toBe("");
+  });
+
+  it("still keeps a line below an anchor when it names a skill via an unambiguous alias (#1188)", () => {
+    const jd =
+      "Benefits we offer:\n" +
+      "We also use React Native for our mobile apps.";
+    const body = stripBoilerplate(jd);
+    expect(body).toContain("React Native");
+  });
+
+  it("keeps skipping the paragraph after an anchor line that itself names a real skill (#1188)", () => {
+    // The anchor line's own skill mention exempts only that line's text from
+    // being dropped — it must not also disarm the skip for the skill-free
+    // EEO lines that follow in the same paragraph.
+    const jd =
+      "We are an equal opportunity employer and value Python expertise.\n" +
+      "We do not discriminate based on race, color, religion, sex, national\n" +
+      "origin, age, disability, veteran status, or any other legally\n" +
+      "protected characteristic.";
+    const body = stripBoilerplate(jd);
+    expect(body).toContain("Python");
+    expect(body.toLowerCase()).not.toContain("do not discriminate");
+    expect(body.toLowerCase()).not.toContain("protected characteristic");
+  });
 });
 
 describe("extractJdTerms", () => {
@@ -71,7 +131,24 @@ describe("extractJdTerms", () => {
     );
   });
 
-  it("excludes skills that only appeared inside boilerplate sections", () => {
+  it("excludes a skill-free boilerplate section but keeps one that mentions a skill (#1187)", () => {
+    const jd = `
+We need Python.
+
+Benefits we offer:
+Unlimited PTO and a 401(k) match.
+`;
+    const { skills } = extractJdTerms(jd);
+    const ids = skills.map((s) => s.id);
+    expect(ids).toContain("python");
+    // The benefits block carries no dictionary skill, so it stays stripped.
+    expect(ids).not.toContain("kotlin");
+  });
+
+  it("keeps a skill mentioned directly below a boilerplate anchor with no blank line (#1187)", () => {
+    // Same shape as the test above, but the line right under "Benefits we
+    // offer:" happens to name a real skill with no blank line in between —
+    // the mention is kept rather than lost with the boilerplate heading.
     const jd = `
 We need Python.
 
@@ -81,8 +158,7 @@ We also do a lot of Kotlin here.
     const { skills } = extractJdTerms(jd);
     const ids = skills.map((s) => s.id);
     expect(ids).toContain("python");
-    // Kotlin only appears in the benefits block — must be stripped.
-    expect(ids).not.toContain("kotlin");
+    expect(ids).toContain("kotlin");
   });
 
   it("emits a snippet that anchors the term in JD context", () => {
