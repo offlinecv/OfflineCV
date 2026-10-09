@@ -2,7 +2,11 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
-import { extractJdTerms, stripBoilerplate } from "./extract-jd-terms.ts";
+import {
+  extractEligibility,
+  extractJdTerms,
+  stripBoilerplate,
+} from "./extract-jd-terms.ts";
 
 const SAMPLE_JD = `
 Senior Backend Engineer
@@ -152,6 +156,311 @@ Kubernetes is a core piece of the platform.
     const out = extractJdTerms("");
     expect(out.all).toHaveLength(0);
     expect(out.nounsDropped).toBe(0);
+  });
+
+  describe("eligibility findings (#793)", () => {
+    it("reports a no-sponsorship finding with a verbatim snippet", () => {
+      const jd = "We use Python and Go.\n\nWe are unable to sponsor employment visas for this position.";
+      const before = extractJdTerms(jd);
+      expect(before.eligibility).toHaveLength(1);
+      expect(before.eligibility[0].kind).toBe("no-sponsorship");
+      expect(before.eligibility[0].snippet.toLowerCase()).toContain(
+        "unable to sponsor",
+      );
+      // Additive only — skills/nouns are unaffected by the finding.
+      expect(before.skills.map((s) => s.id)).toContain("python");
+    });
+
+    it("dedupes a requirement repeated under multiple phrasings to one finding", () => {
+      const jd = `
+We require visa sponsorship is not available for this role.
+Candidates must be authorized to work in the US without sponsorship.
+We are unable to sponsor at this time.
+`;
+      const { eligibility } = extractJdTerms(jd);
+      const kinds = eligibility.map((f) => f.kind);
+      expect(kinds.filter((k) => k === "no-sponsorship")).toHaveLength(1);
+    });
+
+    it("returns an empty eligibility array when the JD states no such language", () => {
+      const { eligibility } = extractJdTerms("We use Python and Go.");
+      expect(eligibility).toEqual([]);
+    });
+
+    it("reports work-authorization and e-verify as distinct findings", () => {
+      const jd = `
+Candidates must be authorized to work in the United States.
+This employer participates in E-Verify.
+`;
+      const { eligibility } = extractJdTerms(jd);
+      const kinds = eligibility.map((f) => f.kind).sort();
+      expect(kinds).toEqual(["e-verify", "work-authorization"]);
+    });
+
+    it.each([
+      "We may periodically re-verify your employment eligibility.",
+      "E-Verifying new hires is standard in this industry.",
+    ])("does not match an anchor inside a longer word: %s", (jd) => {
+      expect(extractJdTerms(jd).eligibility).toEqual([]);
+    });
+
+    it("leaves skills and nouns unchanged whether or not eligibility language is present", () => {
+      const base = "We use Python and Kubernetes for Distributed Systems.";
+      const withEligibility = `${base}\n\nWe are unable to sponsor visas.`;
+      const a = extractJdTerms(base);
+      const b = extractJdTerms(withEligibility);
+      expect(b.skills.map((s) => s.id)).toEqual(a.skills.map((s) => s.id));
+      expect(b.nouns.map((n) => n.display)).toEqual(
+        a.nouns.map((n) => n.display),
+      );
+    });
+
+    it("does not report no-sponsorship for affirmative sponsorship language (#1175)", () => {
+      const jd = "Visa sponsorship is available for qualified candidates.";
+      const { eligibility } = extractJdTerms(jd);
+      expect(eligibility).toEqual([]);
+    });
+
+    it("still reports no-sponsorship when visa sponsorship is negated (#1175)", () => {
+      const jd = "We do not offer visa sponsorship for this role.";
+      const { eligibility } = extractJdTerms(jd);
+      expect(eligibility).toHaveLength(1);
+      expect(eligibility[0].kind).toBe("no-sponsorship");
+    });
+
+    it("recognizes a contraction ('isn't'/'wasn't'/'couldn't') as a negation cue (#1175)", () => {
+      const jd = "Visa sponsorship isn't available for this role.";
+      const { eligibility } = extractJdTerms(jd);
+      expect(eligibility).toHaveLength(1);
+      expect(eligibility[0].kind).toBe("no-sponsorship");
+    });
+
+    it("still reports no-sponsorship when the negation cue is on the previous wrapped line (#1175)", () => {
+      const jd = "We cannot provide\nvisa sponsorship for this role.";
+      const { eligibility } = extractJdTerms(jd);
+      expect(eligibility).toHaveLength(1);
+      expect(eligibility[0].kind).toBe("no-sponsorship");
+    });
+
+    it("matches an eligibility anchor across a double space or a line wrap (#1175)", () => {
+      const doubleSpace = extractJdTerms(
+        "We are unable to  sponsor visas for this role.",
+      );
+      expect(doubleSpace.eligibility).toHaveLength(1);
+
+      const lineWrapped = extractJdTerms(
+        "We are unable to\nsponsor visas for this role.",
+      );
+      expect(lineWrapped.eligibility).toHaveLength(1);
+    });
+
+    it("does not credit a negation cue from an unrelated clause on the same line (#1175)", () => {
+      const jd =
+        "This is not a remote role, but we offer visa sponsorship for qualified candidates.";
+      const { eligibility } = extractJdTerms(jd);
+      expect(eligibility).toEqual([]);
+    });
+
+    describe("additional common phrasings (review on #1175)", () => {
+      it("detects 'will not sponsor'", () => {
+        const { eligibility } = extractJdTerms(
+          "We will not sponsor visas for this position.",
+        );
+        expect(eligibility).toHaveLength(1);
+        expect(eligibility[0]!.kind).toBe("no-sponsorship");
+      });
+
+      it("detects 'do not sponsor'", () => {
+        const { eligibility } = extractJdTerms(
+          "We do not sponsor H-1B visas for this role.",
+        );
+        expect(eligibility).toHaveLength(1);
+        expect(eligibility[0]!.kind).toBe("no-sponsorship");
+      });
+
+      it("detects 'must be legally authorized to work'", () => {
+        const { eligibility } = extractJdTerms(
+          "Candidates must be legally authorized to work in the United States.",
+        );
+        expect(eligibility).toHaveLength(1);
+        expect(eligibility[0]!.kind).toBe("work-authorization");
+      });
+
+      it("detects 'now or in the future require sponsorship'", () => {
+        const { eligibility } = extractJdTerms(
+          "Applicants who now or in the future require sponsorship will not be considered.",
+        );
+        expect(eligibility).toHaveLength(1);
+        expect(eligibility[0]!.kind).toBe("no-sponsorship");
+      });
+
+      it("detects 'without sponsorship'", () => {
+        const { eligibility } = extractJdTerms(
+          "You must be able to work without sponsorship.",
+        );
+        expect(eligibility).toHaveLength(1);
+        expect(eligibility[0]!.kind).toBe("no-sponsorship");
+      });
+    });
+
+    describe("term extraction is main's, unchanged (#793 AC)", () => {
+      // Each `body` below is what `stripBoilerplate` on origin/main returns for
+      // the same input — eligibility detection must not move it by a byte, so
+      // skills, nouns and the coverage score cannot move either. Several of
+      // these over-strip (main drops every non-blank line after an anchor up
+      // to a blank line); that is main's behaviour and out of #793's scope.
+      const MAIN_BODIES: readonly [jd: string, body: string][] = [
+        [
+          "We are unable to sponsor or take over sponsorship of an employment\nvisa (e.g., H-1B, TN, OPT/CPT) now or in the future.",
+          "",
+        ],
+        [
+          "We are unable to sponsor or take over sponsorship of an employment\nvisa (e.g., H-1B, TN, OPT/CPT) now or in the future.\nMust have Python and Kubernetes.",
+          "",
+        ],
+        ["We are unable to sponsor visas.\nMust have Python and Kubernetes.", ""],
+        [
+          "Salary range: $100k-$150k.\nWe are unable to sponsor visas. Must have Python and Kubernetes experience.",
+          "",
+        ],
+        [
+          "- 5 years Kafka, and\nmust be authorized to work in the US without sponsorship.\n- 5 years Python",
+          "- 5 years Kafka, and",
+        ],
+        [
+          "Requirements:\n- Must be authorized to work in the US\n- 5+ years of Python\n- Kubernetes and Terraform",
+          "Requirements:",
+        ],
+      ];
+
+      it.each(MAIN_BODIES)("matches main's stripped body for %j", (jd, body) => {
+        expect(stripBoilerplate(jd)).toBe(body);
+        expect(extractJdTerms(jd).body).toBe(body);
+      });
+
+      it("keeps a soft-wrapped visa continuation's acronyms out of terms (Samhit's case)", () => {
+        const { all, eligibility } = extractJdTerms(MAIN_BODIES[0]![0]);
+        const displays = all.map((t) => t.display.toUpperCase());
+        expect(displays).not.toContain("TN");
+        expect(displays).not.toContain("OPT");
+        expect(displays).not.toContain("CPT");
+        expect(eligibility.map((f) => f.kind)).toEqual(["no-sponsorship"]);
+      });
+
+      it("still reports findings for text main strips", () => {
+        expect(
+          extractJdTerms(MAIN_BODIES[4]![0])
+            .eligibility.map((f) => f.kind)
+            .sort(),
+        ).toEqual(["no-sponsorship", "work-authorization"]);
+      });
+    });
+
+    describe("negation must govern a polarity-neutral anchor", () => {
+      it("does not credit a negation cue from the previous list item to an affirmative sponsorship bullet", () => {
+        const jd = "- No relocation assistance\n- Visa sponsorship available";
+        expect(extractJdTerms(jd).eligibility).toEqual([]);
+      });
+
+      it("treats a decimal point as part of the clause, not a boundary", () => {
+        const { eligibility } = extractJdTerms(
+          "We do not have 3.5 million in funding for visa sponsorship.",
+        );
+        expect(eligibility.map((f) => f.kind)).toEqual(["no-sponsorship"]);
+      });
+
+      it("keeps a comma-set negation in the same clause as the anchor", () => {
+        expect(
+          extractEligibility(
+            "Visa sponsorship, unfortunately, is not available for this position.",
+          ).map((f) => f.kind),
+        ).toEqual(["no-sponsorship"]);
+        expect(
+          extractEligibility(
+            "Applicants who now or in the future require sponsorship, including H-1B, will not be considered.",
+          ).map((f) => f.kind),
+        ).toEqual(["no-sponsorship"]);
+      });
+
+      it("does not carry a negation cue across a contrastive break", () => {
+        expect(
+          extractEligibility("No relocation, but visa sponsorship is available."),
+        ).toEqual([]);
+        expect(
+          extractEligibility("No relocation but visa sponsorship is available."),
+        ).toEqual([]);
+        expect(
+          extractEligibility("No relocation; visa sponsorship is available."),
+        ).toEqual([]);
+        expect(
+          extractEligibility(
+            "We cannot relocate you, however visa sponsorship is available.",
+          ),
+        ).toEqual([]);
+      });
+
+      it("does not report no-sponsorship for the idiomatic 'no doubt ... is available'", () => {
+        expect(
+          extractEligibility(
+            "There is no doubt visa sponsorship is available for exceptional candidates.",
+          ),
+        ).toEqual([]);
+      });
+
+      it("does not credit a cue that is in the clause but too far from the anchor to govern it", () => {
+        expect(
+          extractEligibility(
+            "We cannot stress enough how much our team values growth and learning, and visa sponsorship is available.",
+          ),
+        ).toEqual([]);
+      });
+    });
+
+    it("does not report no-sponsorship when 'now or in the future require sponsorship' is stated affirmatively", () => {
+      const { eligibility } = extractJdTerms(
+        "We happily sponsor applicants who now or in the future require sponsorship.",
+      );
+      expect(eligibility).toEqual([]);
+    });
+
+    it("does not match an anchor whose words are split across a blank line", () => {
+      expect(
+        extractJdTerms("We are unable to\n\nsponsor a meetup night every month.")
+          .eligibility,
+      ).toEqual([]);
+      expect(
+        extractJdTerms("We are unable to\n  \nsponsor a meetup night every month.")
+          .eligibility,
+      ).toEqual([]);
+    });
+
+    describe("snippet quotes only the anchor's own sentence", () => {
+      it("does not bleed into the next sentence after a wrapped anchor", () => {
+        const eligibility = extractEligibility(
+          "We are unable\nto\nsponsor\nvisas at this time. We use Rust and Elixir.",
+        );
+        expect(eligibility.map((f) => f.snippet)).toEqual([
+          "We are unable to sponsor visas at this time.",
+        ]);
+      });
+
+      it("does not reach back into the previous list item", () => {
+        const eligibility = extractEligibility(
+          "- 5+ years of Python\n- Must be authorized to work in the US\n- Kubernetes",
+        );
+        expect(eligibility.map((f) => f.snippet)).toEqual([
+          "- Must be authorized to work in the US",
+        ]);
+      });
+
+      it("ends a sentence at a period with no trailing space, a PDF-extraction artifact", () => {
+        expect(
+          extractEligibility("We will not sponsor visas.Must know Python.").map(
+            (f) => f.snippet,
+          ),
+        ).toEqual(["We will not sponsor visas."]);
+      });
+    });
   });
 
   it("caps the noun-pass list and records overflow on nounsDropped", () => {

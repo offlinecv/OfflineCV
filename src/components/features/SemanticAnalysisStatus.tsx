@@ -24,6 +24,10 @@
  * model "didn't return a verdict", which is a failure report for a run that was
  * never attempted.
  *
+ * The one check that precedes capability is a zero-term keyword result (an
+ * eligibility-only JD, #793): no line applies to it on any browser, and the
+ * no-WebGPU line would point at a keyword card `JdMatch` does not render.
+ *
  * ## Exhaustiveness
  *
  * The status branches are a `switch` with a `never`-typed default, not the
@@ -93,6 +97,20 @@ export function SemanticAnalysisStatus({
   // so a progress line would be describing work that isn't happening. Narrows
   // `status` for the switch below, which is why the switch needs no `idle` arm.
   if (status.kind === "idle") return null;
+
+  // An eligibility-only JD (#793) extracted no terms, so it never takes the
+  // semantic path (`useJdMatch`'s `takingSemanticPath` requires
+  // `terms.length > 0`) and `JdMatch` hides the keyword card. Every line below
+  // describes either a run or that card, so none applies. Checked before
+  // capability: a no-WebGPU browser would otherwise point at "the keyword
+  // coverage below", which isn't rendered.
+  if (
+    status.kind === "ready" &&
+    status.result.path === "keyword" &&
+    status.result.terms.length === 0
+  ) {
+    return null;
+  }
 
   // Capability first — see the docblock. Not foldable into the switch.
   if (capability === null) {

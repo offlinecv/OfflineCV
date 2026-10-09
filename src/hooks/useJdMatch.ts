@@ -40,9 +40,12 @@
  * State machine — one input, one status object:
  *
  *   idle
- *     · debounced JD is empty (post-trim), or extract yielded zero terms.
+ *     · debounced JD is empty (post-trim), or extract yielded zero terms AND
+ *       zero eligibility findings.
  *   ready (keyword, synchronous, render-time)
- *     · semantic opt-in is off, OR WebGPU is unavailable, OR still detecting.
+ *     · semantic opt-in is off, OR WebGPU is unavailable, OR still detecting,
+ *       OR extract yielded zero terms (an eligibility-only JD — nothing for
+ *       the semantic arm to judge).
  *       Result is `{ path: "keyword", coverage, terms, nounsDropped }`.
  *   loading → running → ready (semantic, async)
  *     · semantic opt-in is on AND WebGPU is available.
@@ -379,20 +382,27 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
   const keywordResult = useMemo<KeywordJdMatchResult | null>(() => {
     if (trimmedJdText.length === 0) return null;
     const extracted = extractJdTerms(trimmedJdText);
-    if (extracted.all.length === 0) return null;
+    if (extracted.all.length === 0 && extracted.eligibility.length === 0) return null;
     return {
       path: "keyword",
       coverage: computeCoverage(parsed, extracted.all),
       terms: extracted.all,
       nounsDropped: extracted.nounsDropped,
+      eligibility: extracted.eligibility,
     };
   }, [trimmedJdText, parsed]);
 
-  // We take the semantic path iff opt-in AND WebGPU available AND we have a
-  // non-null keyword result (empty/degenerate JDs skip semantic entirely,
-  // matching the pre-#203 no-op branch).
+  // We take the semantic path iff opt-in AND WebGPU available AND the keyword
+  // result has at least one term. Empty/degenerate JDs skip semantic
+  // entirely (matching the pre-#203 no-op branch), and so does an
+  // eligibility-only JD (#793): its keyword result is non-null only to carry
+  // the findings, and loading the engine to judge zero requirements is a
+  // multi-minute download for nothing.
   const takingSemanticPath =
-    semanticOptIn && capability === "available" && keywordResult !== null;
+    semanticOptIn &&
+    capability === "available" &&
+    keywordResult !== null &&
+    keywordResult.terms.length > 0;
 
   // Derived status — the single source of truth the consumer reads. Every
   // branch is a render-time compute; no effect flush is needed for the
@@ -427,7 +437,12 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
   // more-informative outcome that must fire its own event rather than being
   // deduped against the earlier keyword one.
   //
-  // Two guards on top of that:
+  // Guards on top of that:
+  //   - Skip a `ready` keyword result with zero terms — an eligibility-only
+  //     JD (#793). No arm matched anything, and the pre-#793 hook stayed
+  //     `idle` here and fired nothing; firing now would record
+  //     `keyword`/`available` for an opted-in user, which this event's
+  //     contract reads as "the semantic pipeline itself degraded".
   //   - Skip while `semanticOptIn` is true but `capability` hasn't resolved
   //     yet. Without this, an opt-in whose probe is still pending renders
   //     `ready` with the keyword result (⁠`takingSemanticPath` requires
@@ -458,6 +473,9 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
   const trackedAnalysisRef = useRef<TrackedAnalysis | null>(null);
   useEffect(() => {
     if (status.kind !== "ready") return;
+    if (status.result.path === "keyword" && status.result.terms.length === 0) {
+      return;
+    }
     if (semanticOptIn && capability === null) return;
     const effectiveCapability = semanticOptIn ? capability : null;
 

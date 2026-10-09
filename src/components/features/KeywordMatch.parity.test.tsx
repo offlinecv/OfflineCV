@@ -13,11 +13,14 @@
  * every user who never opts into on-device analysis.
  *
  * The golden strings below were captured by rendering the PRE-#204
- * `JdMatch.tsx` (`git show HEAD~:…`) against these three inputs, not by
+ * `JdMatch.tsx` (`git show HEAD~:…`) against these inputs, not by
  * snapshotting the new component — a self-captured snapshot would pass no
- * matter what the refactor did. Three inputs because they exercise the three
- * branches the view has: populated columns + footnote, both empty-state
- * copies, and the singular/plural fork in the footnote.
+ * matter what the refactor did. Two still-pinned branches: populated columns
+ * + footnote, and the singular/plural fork in the footnote. The third
+ * original branch — a zero-term result rendering both empty-state copies —
+ * stopped being pinned once the empty-keyword-card nit (review on #1175)
+ * made `JdMatch` suppress the card entirely for `terms.length === 0`; see
+ * the last test below.
  *
  * If a future change to the keyword view is INTENDED, update these strings in
  * the same commit; the point is that it cannot happen by accident.
@@ -72,9 +75,6 @@ const EMPTY: JdMatchResult = {
 const POPULATED_HTML =
   '<section class="rounded-xl border border-border-light bg-surface-card p-5 flex flex-col gap-4 shadow-xs"><header class="flex flex-col gap-1"><div class="flex items-baseline gap-2"><h2 class="text-sm font-semibold uppercase tracking-wider text-content-muted">JD match</h2><span class="rounded bg-surface-subtle px-1.5 py-0.5 text-4xs font-semibold uppercase tracking-wider text-content-secondary">alpha</span></div><p class="text-base font-semibold text-content-primary">Your resume mentions 2 of 3 terms from this JD.</p><p class="text-sm text-content-tertiary">Weighted coverage: <span class="font-mono text-content-secondary">62/100</span> — skill 1.0, phrase 0.5.</p><p class="max-w-prose text-sm text-content-tertiary">Diagnostic, not a verdict. We look for skills and phrases by name — we don&#x27;t read context. Your JD text stays in this browser tab.</p></header><div class="grid gap-4 md:grid-cols-2"><section class="flex flex-col gap-2"><h3 class="text-sm font-semibold uppercase tracking-wider text-content-muted">Covered (2)</h3><ul class="flex flex-col gap-1"><li class="flex items-baseline gap-2 rounded border border-border-light px-2 py-1.5" title="…snippet for react…"><span class="text-sm font-semibold text-feedback-success-text">✓</span><span class="text-sm text-content-primary">react</span><span class="ml-auto font-mono text-3xs uppercase tracking-wider text-content-muted">skill</span></li><li class="flex items-baseline gap-2 rounded border border-border-light px-2 py-1.5" title="…snippet for Distributed Systems…"><span class="text-sm font-semibold text-feedback-success-text">✓</span><span class="text-sm text-content-primary">Distributed Systems</span><span class="ml-auto font-mono text-3xs uppercase tracking-wider text-content-muted">phrase</span></li></ul></section><section class="flex flex-col gap-2"><h3 class="text-sm font-semibold uppercase tracking-wider text-content-muted">Missing (1)</h3><ul class="flex flex-col gap-1"><li class="flex items-baseline gap-2 rounded border border-border-light px-2 py-1.5" title="…snippet for kubernetes…"><span class="text-sm font-semibold text-content-muted">•</span><span class="text-sm text-content-primary">kubernetes</span><span class="ml-auto font-mono text-3xs uppercase tracking-wider text-content-muted">skill</span></li></ul></section></div><p class="text-2xs text-content-muted">+3 more capitalized phrases in this JD weren&#x27;t surfaced — the noun-phrase pass ranks hits by how often they recur (weighting the requirements section) and keeps the top ones to keep the panel readable.</p></section>';
 
-const EMPTY_HTML =
-  '<section class="rounded-xl border border-border-light bg-surface-card p-5 flex flex-col gap-4 shadow-xs"><header class="flex flex-col gap-1"><div class="flex items-baseline gap-2"><h2 class="text-sm font-semibold uppercase tracking-wider text-content-muted">JD match</h2><span class="rounded bg-surface-subtle px-1.5 py-0.5 text-4xs font-semibold uppercase tracking-wider text-content-secondary">alpha</span></div><p class="text-base font-semibold text-content-primary">Your resume mentions 0 of 0 terms from this JD.</p><p class="text-sm text-content-tertiary">Weighted coverage: <span class="font-mono text-content-secondary">0/100</span> — skill 1.0, phrase 0.5.</p><p class="max-w-prose text-sm text-content-tertiary">Diagnostic, not a verdict. We look for skills and phrases by name — we don&#x27;t read context. Your JD text stays in this browser tab.</p></header><div class="grid gap-4 md:grid-cols-2"><section class="flex flex-col gap-2"><h3 class="text-sm font-semibold uppercase tracking-wider text-content-muted">Covered (0)</h3><p class="text-sm text-content-tertiary">None of the JD terms we extracted show up in the resume text.</p></section><section class="flex flex-col gap-2"><h3 class="text-sm font-semibold uppercase tracking-wider text-content-muted">Missing (0)</h3><p class="text-sm text-content-tertiary">Every term we extracted shows up somewhere in the resume.</p></section></div></section>';
-
 /** Only the footnote differs from POPULATED_HTML — pinned in full anyway, so
  *  a change that "fixes" one case and breaks the other can't slip through. */
 const SINGULAR_FOOTNOTE_HTML = POPULATED_HTML.replace(
@@ -89,8 +89,12 @@ describe("KeywordMatch parity with the pre-#204 JdMatch body", () => {
     );
   });
 
-  it("renders both empty-state copies unchanged, with no footnote", () => {
-    expect(renderToStaticMarkup(<JdMatch result={EMPTY} />)).toBe(EMPTY_HTML);
+  it("renders nothing for a zero-term keyword result (empty-keyword-card nit, review on #1175)", () => {
+    // Pre-#204 and immediately post-#204 this rendered a full card — "0 of 0
+    // terms", "0/100", both columns' empty-state copy. A JD with no
+    // extractable skill/noun terms has nothing diagnostic to show, so the
+    // card is suppressed instead.
+    expect(renderToStaticMarkup(<JdMatch result={EMPTY} />)).toBe("");
   });
 
   it("keeps the singular footnote fork unchanged", () => {

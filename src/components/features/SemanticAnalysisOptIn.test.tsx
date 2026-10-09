@@ -36,8 +36,24 @@ const KEYWORD: JdMatchResult = {
     score: 0,
     weights: { skill: 1, noun: 0.5 },
   },
-  terms: [],
+  terms: [
+    { id: "go", display: "Go", source: "skill", snippet: "We use Go." },
+  ],
   nounsDropped: 0,
+};
+
+/** A keyword result for a JD whose only content is eligibility language
+ *  (#793): zero terms, one finding. `useJdMatch` never takes the semantic
+ *  path for it (`takingSemanticPath` requires `terms.length > 0`). */
+const ELIGIBILITY_ONLY: JdMatchResult = {
+  ...KEYWORD,
+  terms: [],
+  eligibility: [
+    {
+      kind: "no-sponsorship",
+      snippet: "We are unable to sponsor employment visas.",
+    },
+  ],
 };
 
 const SEMANTIC: JdMatchResult = {
@@ -164,6 +180,21 @@ describe("SemanticAnalysisOptIn status line", () => {
     expect(el.textContent).toContain("didn't return a verdict for this JD");
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
+
+  it.each([["available"], ["no-webgpu"], [null]] as const)(
+    "renders no line for an eligibility-only JD (capability %s) — no run happened and no keyword card is shown",
+    (capability) => {
+      // Mirrors `useJdMatch`'s zero-terms guard: an eligibility-only JD stays on
+      // the keyword arm by design, and `JdMatch` hides the keyword card, so
+      // neither the "didn't return a verdict" degrade nor the no-WebGPU line
+      // ("the keyword coverage below…") describes anything on screen.
+      const el = render({ kind: "ready", result: ELIGIBILITY_ONLY }, capability);
+      expect(el.querySelector('[role="status"]')).toBeNull();
+      expect(el.textContent).not.toContain("didn't return a verdict");
+      expect(el.textContent).not.toContain("keyword coverage below");
+      expect(el.textContent).not.toContain("Checking whether this browser");
+    },
+  );
 
   it("never leaks the controller's raw error message", () => {
     const el = render(

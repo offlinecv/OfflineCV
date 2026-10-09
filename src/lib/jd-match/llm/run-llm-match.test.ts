@@ -115,6 +115,7 @@ function freshKeywordResult(resume: HeuristicParsedResume) {
     coverage: computeCoverage(resume, extracted.all),
     terms: extracted.all,
     nounsDropped: extracted.nounsDropped,
+    eligibility: extracted.eligibility,
   };
 }
 

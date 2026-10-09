@@ -19,8 +19,13 @@
  * For each extracted term we record a short snippet (~80 chars) showing
  * where in the JD it surfaced. The UI hovers that snippet so a user can
  * see *why* a term was extracted.
+ *
+ * Separately, `extractEligibility` reports sponsorship / work-authorization /
+ * E-Verify statements (#793) from the UNSTRIPPED JD. It is display-only and
+ * never feeds the passes above.
  */
 
+import { escapeRegex } from "./regex-utils.ts";
 import { getSkillIndex } from "./skills.ts";
 
 /**
@@ -38,6 +43,10 @@ import { getSkillIndex } from "./skills.ts";
  *
  * If you add an anchor, lowercase it and keep it phrase-shaped — we match
  * with `.includes()` after whitespace normalization, not regex.
+ *
+ * The visa / work-authorization / E-Verify entries stay here even though
+ * `ELIGIBILITY_ANCHORS` below re-detects them for display (#793): this list
+ * alone decides what term extraction sees, and #793 changes none of it.
  */
 const BOILERPLATE_ANCHORS: readonly string[] = [
   "equal opportunity employer",
@@ -72,6 +81,265 @@ const BOILERPLATE_ANCHORS: readonly string[] = [
   "e-verify",
 ];
 
+/**
+ * A JD-stated eligibility constraint (#793) — sponsorship, work-authorization,
+ * or E-Verify language. `stripBoilerplate` already keeps these phrases out of
+ * term extraction (they are in `BOILERPLATE_ANCHORS` above, unchanged), but
+ * unlike EEO/benefits boilerplate they are the one kind of JD fine print that
+ * can rule a candidate out, so dropping them silently is a routing gap. This
+ * surfaces them, display-only.
+ *
+ * Detection runs on the UNSTRIPPED JD and never feeds `body`, `skills`,
+ * `nouns` or coverage — term extraction is exactly what it was before #793,
+ * by construction, because it does not read anything defined below.
+ *
+ * Reports ONLY what the JD states, verbatim. It never evaluates the user
+ * against it — no pass/fail, no gating. We do not know the candidate's status
+ * unless they tell us, and asserting it is not this product's place.
+ */
+export interface EligibilityFinding {
+  kind: "no-sponsorship" | "work-authorization" | "e-verify";
+  /** Verbatim JD quote around the anchor, clipped to its own sentence
+   *  (`sentenceAround`) and to the same ~80-char window as
+   *  `ExtractedTerm.snippet`. */
+  snippet: string;
+}
+
+/**
+ * Phrases that anchor an eligibility constraint, each tagged with the
+ * `EligibilityFinding.kind` it reports. A superset of the eligibility phrases
+ * in `BOILERPLATE_ANCHORS` — the extra phrasings here only add findings, they
+ * never change what `stripBoilerplate` removes. Several phrases share a kind;
+ * `detectEligibility` dedupes to one finding per kind, keeping whichever
+ * occurrence comes first in the JD text.
+ */
+const ELIGIBILITY_ANCHORS: readonly {
+  phrase: string;
+  kind: EligibilityFinding["kind"];
+  /** Set when the phrase alone carries no polarity — "visa sponsorship"
+   *  appears verbatim in both "no visa sponsorship" and "visa sponsorship is
+   *  available". Such a match counts only when a negation cue governs it
+   *  (`negationGoverns`). The other anchors state the negative outright. */
+  requiresNegation?: boolean;
+}[] = [
+  { phrase: "visa sponsorship", kind: "no-sponsorship", requiresNegation: true },
+  { phrase: "sponsorship is not", kind: "no-sponsorship" },
+  { phrase: "unable to sponsor", kind: "no-sponsorship" },
+  { phrase: "will not sponsor", kind: "no-sponsorship" },
+  { phrase: "do not sponsor", kind: "no-sponsorship" },
+  // Polarity-neutral too: the subject of both "applicants who now or in the
+  // future require sponsorship will not be considered" and "we happily
+  // sponsor applicants who now or in the future require sponsorship".
+  {
+    phrase: "now or in the future require sponsorship",
+    kind: "no-sponsorship",
+    requiresNegation: true,
+  },
+  { phrase: "without sponsorship", kind: "no-sponsorship" },
+  { phrase: "must be authorized to work", kind: "work-authorization" },
+  { phrase: "must be legally authorized to work", kind: "work-authorization" },
+  { phrase: "e-verify", kind: "e-verify" },
+];
+
+/** The gap an anchor's literal space may stretch to: a run of non-newline
+ *  whitespace holding AT MOST ONE line break (a double space, or a line wrap
+ *  mid-phrase), never a blank line — so an anchor cannot bridge two
+ *  paragraphs ("…unable to\n\nSponsor a meetup night…"). `[^\S\n]` rather
+ *  than `[ \t]` so a pasted non-breaking space still counts. */
+const ANCHOR_GAP = String.raw`(?:[^\S\n]+\n?|\n)[^\S\n]*`;
+
+/** Case-insensitive, whitespace-tolerant regex for one eligibility anchor:
+ *  escape regex metachars, then widen each literal space to `ANCHOR_GAP`.
+ *  `(?<!\w)`/`(?!\w)` keep an anchor to whole words — without them
+ *  `e-verify` matches inside "re-verify your employment eligibility" and
+ *  "E-Verifying new hires", neither of which names the program. */
+function eligibilityAnchorRegex(phrase: string): RegExp {
+  return new RegExp(
+    String.raw`(?<!\w)` +
+      escapeRegex(phrase).replace(/ /g, ANCHOR_GAP) +
+      String.raw`(?!\w)`,
+    "ig",
+  );
+}
+
+/** Negation cues that can turn a polarity-neutral anchor negative.
+ *
+ *  `\w*n['’]t` (rather than a bare `n['’]t`) so the leading `\b` anchors at
+ *  the START of a contraction — "isn't"/"couldn't" have no word boundary
+ *  directly before their `n`.
+ *
+ *  `no` excludes the idioms `no doubt`/`no question` ("There is no doubt visa
+ *  sponsorship is available…"): there "no" negates "doubt", not the anchor,
+ *  and it sits close enough to the anchor that no word window can tell the
+ *  two apart. */
+const NEGATION_CUE_RE =
+  /\b(?:no(?!\s+(?:doubt|question)\b)|not|\w*n['’]t|without|unable|cannot|never|ineligible|unavailable)\b/gi;
+
+/** How many words may separate a negation cue from the anchor it governs, on
+ *  either side: before it ("We cannot currently offer visa sponsorship") or
+ *  after it as the predicate ("Visa sponsorship, unfortunately, is not
+ *  available"). A cue further away negates something else in the clause. */
+const NEGATION_WINDOW_WORDS = 6;
+
+/** A sentence boundary for the display-only helpers below: `.`/`!`/`?`
+ *  followed by whitespace, a capital letter (a PDF-extraction artifact like
+ *  "visas.Must"), or the end of the text; a blank line; or a line break that
+ *  starts a list item ("- ", "• ", "1. ", "a) "). Deliberately simple — it
+ *  only ever shortens a quote or the window a negation cue is looked for in,
+ *  so a miss on an abbreviation ("the U.S. government") errs short and cannot
+ *  change any extracted term. */
+const SENTENCE_BREAK_RE =
+  /[.!?](?=\s|[A-Z]|$)|\n[^\S\n]*\n|\n(?=[^\S\n]*(?:[-*•]|\(?(?:\d{1,3}|[a-z])[.)])(?:\s|$))/g;
+
+/** The `[start, end)` span of the sentence (per `SENTENCE_BREAK_RE`) that
+ *  contains the match `[matchStart, matchEnd)`. A terminating `.`/`!`/`?` is
+ *  kept inside the span; a line-break boundary is left outside it. */
+function sentenceAround(
+  text: string,
+  matchStart: number,
+  matchEnd: number,
+): { start: number; end: number } {
+  let start = 0;
+  let end = text.length;
+  for (const brk of text.matchAll(SENTENCE_BREAK_RE)) {
+    const brkStart = brk.index;
+    const brkEnd = brkStart + brk[0].length;
+    if (brkEnd <= matchStart) start = brkEnd;
+    else if (brkStart >= matchEnd) {
+      end = brk[0].startsWith("\n") ? brkStart : brkEnd;
+      break;
+    }
+  }
+  return { start, end };
+}
+
+/** Where one clause of a sentence hands over to an unrelated one: a `;`, the
+ *  conjunction "but", or a comma introducing a contrastive "however"/
+ *  "although"/"though"/"whereas"/"while". A bare comma is NOT a break — it
+ *  also sets off asides inside one clause ("Visa sponsorship, unfortunately,
+ *  is not available…"), whose negation belongs to the anchor. */
+const CLAUSE_BREAK_RE =
+  /;|\bbut\b|,\s*(?:however|although|though|whereas|while)\b/gi;
+
+/** Number of words in `s` — a word is any whitespace-delimited run that
+ *  contains a letter or digit, so a stray bullet glyph or dash is not one. */
+function wordCount(s: string): number {
+  return s.split(/\s+/).filter((w) => /[\p{L}\d]/u.test(w)).length;
+}
+
+/**
+ * Whether a negation cue GOVERNS the anchor match `[matchStart, matchEnd)`:
+ * the cue sits in the same clause (the anchor's sentence, narrowed at the
+ * nearest `CLAUSE_BREAK_RE` on either side) and within
+ * `NEGATION_WINDOW_WORDS` of the anchor, before or after it. A cue merely
+ * present somewhere in a long clause is not enough ("We cannot stress enough
+ * how much our team values growth and learning, and visa sponsorship is
+ * available").
+ */
+function negationGoverns(
+  text: string,
+  matchStart: number,
+  matchEnd: number,
+): boolean {
+  const sentence = sentenceAround(text, matchStart, matchEnd);
+  let clauseStart = sentence.start;
+  let clauseEnd = sentence.end;
+  const sentenceText = text.slice(sentence.start, sentence.end);
+  for (const brk of sentenceText.matchAll(CLAUSE_BREAK_RE)) {
+    const brkStart = sentence.start + brk.index;
+    const brkEnd = brkStart + brk[0].length;
+    if (brkEnd <= matchStart) clauseStart = brkEnd;
+    else if (brkStart >= matchEnd) {
+      clauseEnd = brkStart;
+      break;
+    }
+  }
+  const before = text.slice(clauseStart, matchStart);
+  for (const cue of before.matchAll(NEGATION_CUE_RE)) {
+    const between = before.slice(cue.index + cue[0].length);
+    if (wordCount(between) <= NEGATION_WINDOW_WORDS) return true;
+  }
+  const after = text.slice(matchEnd, clauseEnd);
+  for (const cue of after.matchAll(NEGATION_CUE_RE)) {
+    if (wordCount(after.slice(0, cue.index)) <= NEGATION_WINDOW_WORDS) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Detect JD eligibility constraints WITHOUT running the skill/noun extraction
+ * passes. `extractJdTerms` calls this internally; `runLlmMatch`'s semantic
+ * success path (which never calls `extractJdTerms` — the LLM reads the raw
+ * JD directly) calls it standalone so both arms of `JdMatchResult` carry the
+ * same findings.
+ */
+export function extractEligibility(
+  rawJd: string,
+  snippetChars = 80,
+): EligibilityFinding[] {
+  return detectEligibility(rawJd.replace(/\r\n?/g, "\n"), snippetChars);
+}
+
+/** Stable, human-sensible finding order rather than anchor-list order. */
+const ELIGIBILITY_KIND_ORDER: readonly EligibilityFinding["kind"][] = [
+  "no-sponsorship",
+  "work-authorization",
+  "e-verify",
+];
+
+/**
+ * Scan the newline-normalized, UNSTRIPPED JD for eligibility anchors and
+ * return one finding per `kind`, anchored to that kind's first occurrence in
+ * the text, each quoting its own sentence verbatim.
+ */
+function detectEligibility(
+  normalized: string,
+  snippetChars: number,
+): EligibilityFinding[] {
+  const firstByKind = new Map<
+    EligibilityFinding["kind"],
+    { index: number; length: number }
+  >();
+  for (const { phrase, kind, requiresNegation } of ELIGIBILITY_ANCHORS) {
+    for (const m of normalized.matchAll(eligibilityAnchorRegex(phrase))) {
+      const end = m.index + m[0].length;
+      if (requiresNegation && !negationGoverns(normalized, m.index, end)) {
+        continue;
+      }
+      const existing = firstByKind.get(kind);
+      if (!existing || m.index < existing.index) {
+        firstByKind.set(kind, { index: m.index, length: m[0].length });
+      }
+    }
+  }
+  const out: EligibilityFinding[] = [];
+  for (const kind of ELIGIBILITY_KIND_ORDER) {
+    const hit = firstByKind.get(kind);
+    if (!hit) continue;
+    // Quote only the anchor's own sentence: a fixed window centered on a
+    // short sentence overruns into the next, unrelated one ("…sponsor visas
+    // at this time. We use Rust and Eli…"), which is no longer a quote of
+    // the eligibility statement.
+    const { start, end } = sentenceAround(
+      normalized,
+      hit.index,
+      hit.index + hit.length,
+    );
+    out.push({
+      kind,
+      snippet: snippetAround(
+        normalized.slice(start, end),
+        hit.index - start,
+        hit.length,
+        snippetChars,
+      ),
+    });
+  }
+  return out;
+}
+
 export interface ExtractedTerm {
   /** Stable identifier — canonical skill ID for the skill pass; the lowercased
    *  noun phrase for the noun pass. UI uses this as a React key. */
@@ -100,6 +368,11 @@ export interface ExtractJdTermsResult {
   /** JD text after boilerplate exclusion and whitespace normalization.
    *  Exposed so coverage / UI can pull snippets from the same view we matched. */
   body: string;
+  /** JD-stated eligibility constraints (sponsorship / work-authorization /
+   *  E-Verify) — see `EligibilityFinding`. Display-only: detected on the raw
+   *  JD, never affects `skills`, `nouns`, `all`, or `body`. Empty when the
+   *  JD states none. */
+  eligibility: EligibilityFinding[];
 }
 
 /**
@@ -429,6 +702,7 @@ export function extractJdTerms(
 ): ExtractJdTermsResult {
   const snippetChars = options.snippetChars ?? 80;
   const body = stripBoilerplate(rawJd);
+  const eligibility = extractEligibility(rawJd, snippetChars);
   const titleLower = (options.postingTitle ?? "").toLowerCase();
 
   const skills = extractSkillPass(body, snippetChars);
@@ -457,6 +731,7 @@ export function extractJdTerms(
     all: [...skills, ...nouns],
     nounsDropped,
     body,
+    eligibility,
   };
 }
 

@@ -16,7 +16,7 @@
  */
 
 import type { CoverageResult } from "./coverage.ts";
-import type { ExtractedTerm } from "./extract-jd-terms.ts";
+import type { EligibilityFinding, ExtractedTerm } from "./extract-jd-terms.ts";
 import type { RequirementVerdict } from "./llm/judge-evidence.ts";
 
 /** Per-status verdict counts for the semantic arm — what a headline like
@@ -41,11 +41,19 @@ export type JdMatchResult =
       coverage: CoverageResult;
       terms: readonly ExtractedTerm[];
       nounsDropped: number;
+      /** JD-stated eligibility constraints (#793) — sponsorship /
+       *  work-authorization / E-Verify, quoted verbatim. Additive: never
+       *  gates or scores anything. Optional so a hand-built fixture/mock
+       *  result need not supply it; every real producer does. */
+      eligibility?: readonly EligibilityFinding[];
     }
   | {
       path: "semantic";
       verdicts: readonly RequirementVerdict[];
       summary: SemanticMatchSummary;
+      /** Same JD-derived findings as the keyword arm's `eligibility` — the
+       *  JD doesn't change based on which matching path ran. */
+      eligibility?: readonly EligibilityFinding[];
     };
 
 /**
