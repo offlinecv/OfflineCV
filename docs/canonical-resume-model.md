@@ -1,6 +1,6 @@
 # Canonical résumé model — target representation + staged migration plan (#439)
 
-Design for [#439](https://github.com/offlinecv/OfflineCV/issues/439), the follow-up to the architecture decision in [#438](https://github.com/offlinecv/OfflineCV/issues/438) ("one canonical representation, staged").
+Design for [#439](https://github.com/116-Labs/OfflineCV/issues/439), the follow-up to the architecture decision in [#438](https://github.com/116-Labs/OfflineCV/issues/438) ("one canonical representation, staged").
 
 **Status:** the design issue itself was docs-only; its implementation stages have since shipped through the combined Stage D+E cutover (#445). Sections 0–3 and 6 describe the current implementation. Section 4 preserves the staged migration as implementation history.
 
@@ -157,7 +157,7 @@ Per-stage implementation issues were minted from **this** list once it was fixed
 
 The `resumes` IndexedDB store caches the **current canonical cascade envelope** in `SavedResumeSnapshot { result: CascadeResult; score; sourceKind; shapeVersion? }` (`resume-library.ts` → `SavedResumeSnapshot`). `result.canonical.sections.byName` survives IndexedDB structured clone as a `Map`; the storage layer continues to treat the parse as opaque.
 
-`CACHE_SHAPE_VERSION` (`resume-library.ts` → `CACHE_SHAPE_VERSION`) composes `ATS_SCORE_ALGO_VERSION` (`score.ts` → `ATS_SCORE_ALGO_VERSION`, currently `"1.7"`) with `CANONICAL_SHAPE_VERSION` (`heuristics/canonical.ts` → `CANONICAL_SHAPE_VERSION`, currently `"2"`). `saveResumeToLibrary` stamps every snapshot. On a mismatch, `loadResumeFromLibrary` re-parses from the stored PDF `Blob`, recomputes the score, and re-stamps the record; if no source bytes exist, it refuses to hydrate the stale shape. A stale record is never silently deserialized as the current canonical model. Refs [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401).
+`CACHE_SHAPE_VERSION` (`resume-library.ts` → `CACHE_SHAPE_VERSION`) composes `ATS_SCORE_ALGO_VERSION` (`score.ts` → `ATS_SCORE_ALGO_VERSION`, currently `"1.7"`) with `CANONICAL_SHAPE_VERSION` (`heuristics/canonical.ts` → `CANONICAL_SHAPE_VERSION`, currently `"2"`). `saveResumeToLibrary` stamps every snapshot. On a mismatch, `loadResumeFromLibrary` re-parses from the stored PDF `Blob`, recomputes the score, and re-stamps the record; if no source bytes exist, it refuses to hydrate the stale shape. A stale record is never silently deserialized as the current canonical model. Refs [#321](https://github.com/116-Labs/OfflineCV/issues/321), [#401](https://github.com/116-Labs/OfflineCV/issues/401).
 
 ---
 
@@ -183,7 +183,7 @@ The *problem class* named in #438 is real, and the live code makes the case more
 
 > **§7 correction (folded in at Stage C, #444).** Earlier this read "keyed off a structured `isDatedEntry` **property** on `CanonicalResume`." That over-specified: the structure (`start_date` / `end_date` + precision) is **already** on the entry (`fields.experience[]` / `fields.education[]`). A stored `isDatedEntry` field would be a second entries representation parallel to the field core — exactly the parallel-shape lockstep cost this epic removes (considered and **rejected** via `/clarify`, 2026-07-11). So `isDatedEntry` is a **derived predicate** — `Boolean(start_date || end_date)` — over the dates the entry already holds (`isDatedEntry` in `pdf/ats-resume-model.ts`), never a new core or field. It answers §7's coarse "is this a dated entry at all"; the finer flush-right routing (`headerLineDate` / `subLineDate`) stays on `isLoneDateRange` over the *formatted* range, a render-shape concern Stage C keeps byte-identical.
 
-This remains the standing requirement rather than a shipped guarantee: the raw-line reads named above are still live, so the acceptance test above is the bar the header-vs-entry routing is held to, not a property the cutover established. Refs [#438](https://github.com/offlinecv/OfflineCV/issues/438), [#445](https://github.com/offlinecv/OfflineCV/issues/445).
+This remains the standing requirement rather than a shipped guarantee: the raw-line reads named above are still live, so the acceptance test above is the bar the header-vs-entry routing is held to, not a property the cutover established. Refs [#438](https://github.com/116-Labs/OfflineCV/issues/438), [#445](https://github.com/116-Labs/OfflineCV/issues/445).
 
 ---
 
@@ -204,7 +204,7 @@ Minted **after** this plan is accepted, one per stage, each with its round-trip-
 3. **Stage C** — move the round-trip invariant onto the canonical model; renderer draws from the projection. *(carries the §7 header-vs-entry acceptance test.)*
 4. **Stage D+E** (shipped combined, #445 — supersedes the separate #446) — collapse `LlmParsedResume` + `ApplyOverridesResult` into projections and delete the hand-sync note, **and** cut over: remove the `CascadeResult` façade + ship #321 cache versioning/invalidation (§6). Combined so the façade removal is provable in one round-trip gate rather than two.
 
-Refs [#438](https://github.com/offlinecv/OfflineCV/issues/438), [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401), [#425](https://github.com/offlinecv/OfflineCV/issues/425), [#434](https://github.com/offlinecv/OfflineCV/issues/434), [#435](https://github.com/offlinecv/OfflineCV/issues/435).
+Refs [#438](https://github.com/116-Labs/OfflineCV/issues/438), [#321](https://github.com/116-Labs/OfflineCV/issues/321), [#401](https://github.com/116-Labs/OfflineCV/issues/401), [#425](https://github.com/116-Labs/OfflineCV/issues/425), [#434](https://github.com/116-Labs/OfflineCV/issues/434), [#435](https://github.com/116-Labs/OfflineCV/issues/435).
 
 ---
 
@@ -302,4 +302,4 @@ in `disambiguateCompanyTitle`'s docblock in `src/lib/heuristics/extract/experien
   between title and company parses worse today) — a parser-input question, separate from
   this export-side contract.
 
-Refs [#620](https://github.com/offlinecv/OfflineCV/issues/620), [#466](https://github.com/offlinecv/OfflineCV/issues/466), [#425](https://github.com/offlinecv/OfflineCV/issues/425), [#380](https://github.com/offlinecv/OfflineCV/issues/380).
+Refs [#620](https://github.com/116-Labs/OfflineCV/issues/620), [#466](https://github.com/116-Labs/OfflineCV/issues/466), [#425](https://github.com/116-Labs/OfflineCV/issues/425), [#380](https://github.com/116-Labs/OfflineCV/issues/380).

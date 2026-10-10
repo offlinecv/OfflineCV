@@ -98,7 +98,7 @@ Console (PII-free; full JSON mirrored to the gitignored out dir):
 ## Filing what you find (auto-file, scrub-gated)
 
 For each PII-free defect the skill layer (you, not the harness) files a GitHub
-issue against `offlinecv/OfflineCV`:
+issue against `116-Labs/OfflineCV`:
 
 1. **Draft** a body describing the defect by **class + structural axes** — a
    synthetic `JobPosting` shape (title pattern, comp-string shape, `departments`,

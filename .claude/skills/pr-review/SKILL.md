@@ -149,7 +149,7 @@ ledger block. **Call the wrapper as a command of its own**, from the repo root, 
 ### Step 0 — Detect repo + PR
 
 ```bash
-REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # offlinecv/OfflineCV
+REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # 116-Labs/OfflineCV
 gh pr view "$PR_NUM" --repo "$REPO" \
   --json number,title,state,headRefName,baseRefName,author,files \
   -q '{n:.number,t:.title,s:.state,h:.headRefName,b:.baseRefName,a:.author.login}'

@@ -79,7 +79,7 @@ const APP_VERSION = resolveAppVersion();
 
 // Base path. The custom domain (offlinecv.org) and the GCS bucket root both
 // serve at "/"; the bare github.io project-Pages fallback
-// (offlinecv.github.io/OfflineCV/) needs "/OfflineCV/". Env-driven so
+// (116-labs.github.io/OfflineCV/) needs "/OfflineCV/". Env-driven so
 // each deploy target builds with its own prefix without a code edit — set
 // VITE_BASE_PATH to override. Default "/" is the custom-domain production
 // target and local dev.

@@ -21,7 +21,7 @@ older shape — one branch, one accumulated commit, one PR via `/open-pr`.
 This is the GitHub-only, self-contained sibling of the global `/implement-epic`.
 It has **no Linear code** and **no dependency on `/implement-issue`** — the
 per-issue implementation contract is embedded here, in the subagent spawn
-prompt, so this skill works for anyone who clones `offlinecv/OfflineCV`
+prompt, so this skill works for anyone who clones `116-Labs/OfflineCV`
 (interns included), not just a maintainer whose `~/tools/skills/` has the global
 skills.
 
@@ -33,7 +33,7 @@ skills.
 
 ## Repo facts (offlinecv)
 
-- **Repo:** `offlinecv/OfflineCV`. `main` is protected — every change
+- **Repo:** `116-Labs/OfflineCV`. `main` is protected — every change
   merges through a PR that needs **1 approving review** + a green **`verify`**
   check, and `dismiss_stale_reviews` is **on** (a force-push drops the approval).
   Direct commits/pushes to `main` are blocked (server-side protection + the local
@@ -76,7 +76,7 @@ Parse `$ARGUMENTS` for **either**:
 
 Resolve `<owner>/<repo>` once:
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # 116-Labs/OfflineCV
 ```
 
 **Flags** (strip before parsing the identifier):

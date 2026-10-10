@@ -29,7 +29,7 @@ gh issue list --state open --json number,title,milestone \
 ### Step 0: Detect repo + read the live roadmap
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # 116-Labs/OfflineCV
 OWNER="${REPO%%/*}"                                             # offlinecv
 
 # Open milestones (the canonical roadmap buckets)

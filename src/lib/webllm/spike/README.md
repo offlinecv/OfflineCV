@@ -1,6 +1,6 @@
 # JD Spike Harness
 
-Dev-only spike for issue [#198](https://github.com/offlinecv/OfflineCV/issues/198).
+Dev-only spike for issue [#198](https://github.com/116-Labs/OfflineCV/issues/198).
 Validated Qwen2.5-1.5B (then the default WebLLM model) for two tasks before any production
 design commitment; it now defaults to the shipped model and can run any dev-only candidate
 from `../eval/candidate-models.ts`:
@@ -22,7 +22,7 @@ from `../eval/candidate-models.ts`:
 4. Set **Repeats** (default 3 — higher values give better failure-rate estimates).
 5. Click **Run spike** — the model downloads on first run (1–2 GB); subsequent runs use the cached copy.
 6. When done, click **Download Markdown report**.
-7. Paste the Markdown into issue [#156](https://github.com/offlinecv/OfflineCV/issues/156) as the spike findings.
+7. Paste the Markdown into issue [#156](https://github.com/116-Labs/OfflineCV/issues/156) as the spike findings.
 
 ## Not bundled / no prod code
 

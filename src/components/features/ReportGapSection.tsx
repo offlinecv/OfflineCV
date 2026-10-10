@@ -93,12 +93,12 @@ export function ReportGapSection({
           <p className="text-sm text-content-tertiary">
             Attach it to a new issue at{" "}
             <a
-              href="https://github.com/offlinecv/OfflineCV/issues/new"
+              href="https://github.com/116-Labs/OfflineCV/issues/new"
               target="_blank"
               rel="noreferrer noopener"
               className="underline decoration-dotted hover:decoration-solid"
             >
-              github.com/offlinecv/OfflineCV
+              github.com/116-Labs/OfflineCV
             </a>{" "}
             describing what the parser got wrong.
           </p>

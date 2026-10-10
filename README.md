@@ -248,7 +248,7 @@ record from the saved-resumes card is what removes the data.
 ### GitHub star count
 
 The footer shows the live repo star count via an unauthenticated call to
-`https://api.github.com/repos/offlinecv/OfflineCV` (`src/hooks/useGitHubStars.ts`).
+`https://api.github.com/repos/116-Labs/OfflineCV` (`src/hooks/useGitHubStars.ts`).
 It runs from your browser on app load whenever the ~1h cache
 (`ocv_gh_stars_cache`) is stale, and is **fail-silent** — on network error or
 rate-limit (GitHub allows 60 req/hr/IP unauthenticated) the count is hidden
@@ -429,7 +429,7 @@ The hosted preview at the top of this README is published from `dist/`
 to GitHub Pages by `.github/workflows/deploy-pages.yml` — read that
 workflow for a working end-to-end example. The canonical production URL
 is the custom domain **<https://offlinecv.org>**; the project-Pages URL
-<https://offlinecv.github.io/OfflineCV/> remains as a fallback (built
+<https://116-labs.github.io/OfflineCV/> remains as a fallback (built
 with `VITE_BASE_PATH=/OfflineCV/`).
 
 The build emits two root pages — `/` (the parser audit) and `/jobs` (the

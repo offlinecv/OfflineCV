@@ -5,15 +5,15 @@ skill driving `offlinecv.org` through browser automation, the browser extension,
 converts drafts out of another tool. You do not need to read the source to implement this. If a rule
 here and the code disagree, that is a bug; file it.
 
-**Status:** version 2, introduced in [#766](https://github.com/offlinecv/OfflineCV/issues/766);
-version 1 was [#711](https://github.com/offlinecv/OfflineCV/issues/711). Implemented by
+**Status:** version 2, introduced in [#766](https://github.com/116-Labs/OfflineCV/issues/766);
+version 1 was [#711](https://github.com/116-Labs/OfflineCV/issues/711). Implemented by
 `src/lib/storage/letter-contract.ts` (validation), `src/lib/storage/letters.ts` (the store and its
 integrity rules), `src/lib/storage/company-key.ts` (the company normaliser), and
 `src/lib/storage/backup.ts` (export/import).
 
 **What v2 changed:** a letter is no longer necessarily *for one job*. `jobId` became **optional** and
 `companyKey` joined it, so a letter can be scoped to a job, to a company, or to nothing at all — the
-letter half of [#765](https://github.com/offlinecv/OfflineCV/issues/765)'s standard → company → job
+letter half of [#765](https://github.com/116-Labs/OfflineCV/issues/765)'s standard → company → job
 hierarchy. **If you already produce letters, nothing you send has to change**: see §6.
 
 Records that violate this contract are **refused**, not repaired. offlinecv would rather tell you

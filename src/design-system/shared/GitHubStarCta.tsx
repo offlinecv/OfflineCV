@@ -26,7 +26,7 @@
 
 import { Card } from "./Card.tsx";
 
-const REPO_URL = "https://github.com/offlinecv/OfflineCV";
+const REPO_URL = "https://github.com/116-Labs/OfflineCV";
 
 /**
  * Minimum star count before we surface the number as social proof. Below this,

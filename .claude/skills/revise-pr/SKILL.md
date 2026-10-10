@@ -103,7 +103,7 @@ branches, which loses both the re-verification and the reply.
 ### Step 0: Detect repo + PR
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # 116-Labs/OfflineCV
 OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
 # PR_NUM from the argument, or inferred from the current branch (see Input).
 gh pr view "$PR_NUM" --repo "$REPO" \

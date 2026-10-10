@@ -107,7 +107,7 @@ carried at least one review. Re-derive it yourself rather than trusting the
 snapshot:
 
 ```bash
-gh pr list --repo offlinecv/OfflineCV --state merged --limit 100 \
+gh pr list --repo 116-Labs/OfflineCV --state merged --limit 100 \
   --json number,createdAt,mergedAt,changedFiles,reviews
 ```
 

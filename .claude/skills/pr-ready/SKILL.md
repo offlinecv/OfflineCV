@@ -153,7 +153,7 @@ again at the phase that owns them:
 ### Phase 0: Resolve repo, PR, and config
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # 116-Labs/OfflineCV
 ```
 
 Load `.claude/pr-ready.local.json`. If it's missing or fails to parse, stop —

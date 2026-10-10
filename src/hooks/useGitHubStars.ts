@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * useGitHubStars — fetches the offlinecv/OfflineCV star count from the
+ * useGitHubStars — fetches the 116-Labs/OfflineCV star count from the
  * GitHub REST API, caches the result in localStorage (~1 h TTL), and returns
  * it fail-silently: any network error, rate-limit, or localStorage unavailability
  * resolves to `{ count: undefined }` without throwing or rendering an error UI.
@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 const LS_KEY = "ocv_gh_stars_cache";
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const API_URL =
-  "https://api.github.com/repos/offlinecv/OfflineCV";
+  "https://api.github.com/repos/116-Labs/OfflineCV";
 
 interface StarCache {
   count: number;

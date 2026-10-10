@@ -31,7 +31,7 @@ branch, never on `main`.
 ### Step 0: Detect repo + base
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"          # offlinecv/OfflineCV
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"          # 116-Labs/OfflineCV
 BASE="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"  # main
 # If --base <ref> was provided, override BASE here: BASE="<ref>"
 ```
