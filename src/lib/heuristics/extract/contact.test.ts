@@ -247,6 +247,64 @@ describe("extractContact — location is a locality, not a mailing address (#837
       expect(extractContact(profile, lines).location).toBe("Springfield, IL");
     },
   );
+
+  it.each([
+    [
+      "a unit designator with no street name still opens the Saint-named city (#1173)",
+      "4567 Unit 12 St. Petersburg, FL 33701",
+      "St. Petersburg, FL",
+    ],
+    [
+      "a bare '#' with no space before the identifier still opens the Saint-named city (#1173)",
+      "4567 #12 St. Petersburg, FL 33701",
+      "St. Petersburg, FL",
+    ],
+    [
+      "an 'Apt' unit designator already worked (#1173 regression)",
+      "4567 Apt 4B St. Petersburg, FL 33701",
+      "St. Petersburg, FL",
+    ],
+    [
+      "a '#' with a space before the identifier already worked (#1173 regression)",
+      "4567 # 12 St. Petersburg, FL 33701",
+      "St. Petersburg, FL",
+    ],
+    [
+      "a 'Suite' street-type word with no street name still opens the Saint-named city (#1173)",
+      "4567 Suite 400 St. Petersburg, FL 33701",
+      "St. Petersburg, FL",
+    ],
+    [
+      "a unit designator with a hyphenated sub-unit still opens the Saint-named city (#1186 review)",
+      "4567 Unit 12-A St. Petersburg, FL 33701",
+      "St. Petersburg, FL",
+    ],
+  ])("%s", (_label, line, expected) => {
+    const lines: PdfLine[] = [mkLine("Jane Doe", 0), mkLine(line, 10)];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe(expected);
+  });
+
+  it("does not mistake a street name that merely starts with 'Apt' for a unit designator (#1186 review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567 Aptos St. Petersburg, FL 33701", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("Petersburg, FL");
+  });
+
+  it("opens the Saint-named city for a bare letter-suffixed house number with no unit token (#1186 review)", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("4567A St. Petersburg, FL 33701", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    expect(extractContact(profile, lines).location).toBe("St. Petersburg, FL");
+  });
 });
 
 describe("extractContact — email domain is not a website", () => {
