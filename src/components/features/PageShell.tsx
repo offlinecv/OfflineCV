@@ -300,7 +300,7 @@ export function PageShell({
             Open source
           </a>
           <a
-            href="https://github.com/offlinecv/OfflineCV/blob/main/LICENSE"
+            href="https://github.com/116-Labs/OfflineCV/blob/main/LICENSE"
             target="_blank"
             rel="noreferrer noopener"
             className="hover:underline"

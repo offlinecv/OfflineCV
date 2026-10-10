@@ -32,7 +32,7 @@ those.
 ## Finding something to work on
 
 New here? Start with the
-[open, unclaimed `good first issue` list](https://github.com/offlinecv/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee+-label%3A%22status%3Aclaimed%22).
+[open, unclaimed `good first issue` list](https://github.com/116-Labs/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee+-label%3A%22status%3Aclaimed%22).
 Those issues are scoped to be doable without knowing the whole codebase.
 
 Every issue goes through the same steps before any code is written:
@@ -228,7 +228,7 @@ After filing an issue, place it on the roadmap. With Claude Code, run
 board, and sets its Phase. By hand:
 
 ```bash
-gh issue edit <number> --repo offlinecv/OfflineCV --milestone "<milestone title>"
+gh issue edit <number> --repo 116-Labs/OfflineCV --milestone "<milestone title>"
 ```
 
 Adding an issue to the board (the Phase column) needs the `project`

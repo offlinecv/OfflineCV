@@ -76,7 +76,7 @@ only here.
 commit-message fields** — `EnqueuePullRequestInput` accepts `pullRequestId` /
 `jump` / `expectedHeadOid` and nothing else. So the squash message cannot be
 handed to GitHub at merge time; GitHub *derives* it from repo settings, which on
-`offlinecv/OfflineCV` are:
+`116-Labs/OfflineCV` are:
 
 ```
 squash_merge_commit_title:   COMMIT_OR_PR_TITLE
@@ -114,7 +114,7 @@ below finds a PR; discovery still runs, because gates 3a and 3b need `PR_NUM`
 whichever mode we are in.
 
 ```bash
-REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # offlinecv/OfflineCV
+REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # 116-Labs/OfflineCV
 
 # Never `2>/dev/null || true` here. An empty PR_NUM selects `inplace` below — the
 # mode that rewrites the user's OWN checkout — so "no PR exists" and "the call
@@ -383,7 +383,7 @@ answered, so a `--yes` is an informed one rather than a shrug.
 
 Reason to print when it fires: *the force-push dismisses the existing approval;
 `main` requires one, so the PR can no longer enter the merge queue until someone
-reviews it again.* On `offlinecv/OfflineCV` this gate is live —
+reviews it again.* On `116-Labs/OfflineCV` this gate is live —
 `dismiss_stale_reviews` is `true` on `main`.
 
 #### 3b — Unresolved review threads (soft)

@@ -1,11 +1,11 @@
 ---
 name: create-gh-issue
-description: File a thorough, self-contained GitHub issue against offlinecv/OfflineCV — full analysis, implementation plan, acceptance criteria — using the scripts/create-gh-issue.sh writer so backticks/tables/code blocks survive intact. Use when the user says "create an issue", "file an issue", "/create-gh-issue", or wants a well-scoped issue written from the current conversation.
+description: File a thorough, self-contained GitHub issue against 116-Labs/OfflineCV — full analysis, implementation plan, acceptance criteria — using the scripts/create-gh-issue.sh writer so backticks/tables/code blocks survive intact. Use when the user says "create an issue", "file an issue", "/create-gh-issue", or wants a well-scoped issue written from the current conversation.
 ---
 
 # Create GitHub Issue (offlinecv)
 
-File a comprehensive, **self-contained** issue against `offlinecv/OfflineCV`.
+File a comprehensive, **self-contained** issue against `116-Labs/OfflineCV`.
 The issue must carry enough detail that someone with **no prior context** (a
 contributor after `/clear`, or another intern) can implement it start to finish.
 
@@ -29,7 +29,7 @@ anywhere (branch names, commits, cross-links) until the script reports the real
 First, confirm the backend is reachable (one line, non-blocking):
 
 ```bash
-gh repo view --json nameWithOwner -q .nameWithOwner   # → offlinecv/OfflineCV
+gh repo view --json nameWithOwner -q .nameWithOwner   # → 116-Labs/OfflineCV
 ```
 
 If `gh` isn't installed or authenticated, stop and tell the user to run
@@ -155,7 +155,7 @@ the full plan back for line-by-line approval.
 **Error handling:**
 - Exit 2 = arg/env error (missing required arg, `gh` not on PATH, or no GitHub
   remote detected). For the last, run from the repo root or pass `--repo
-  offlinecv/OfflineCV`.
+  116-Labs/OfflineCV`.
 - Exit 1 = `gh issue create` failed. Most common cause: a `--labels` value that
   doesn't exist. Check `gh label list`; drop or correct the label and retry. If a
   genuinely new label is needed, ask the user before `gh label create`.
@@ -164,7 +164,7 @@ the full plan back for line-by-line approval.
 
 Every issue needs at least one **type** label; add the domain labels that fit
 (most issues carry 2–3). These are the labels that exist in
-`offlinecv/OfflineCV` today — check `gh label list` if unsure:
+`116-Labs/OfflineCV` today — check `gh label list` if unsure:
 
 ### Type (pick at least one)
 | Label | When |
@@ -190,7 +190,7 @@ existing one or ask the user before creating a new label — don't invent taxono
 ## Milestones (the roadmap)
 
 offlinecv plans on four milestones (read live with
-`gh api repos/offlinecv/OfflineCV/milestones --jq '.[] | "\(.number)\t\(.title)"'`).
+`gh api repos/116-Labs/OfflineCV/milestones --jq '.[] | "\(.number)\t\(.title)"'`).
 Pass `--milestone` by title or number when the issue's home is clear:
 
 | # | Title | Role |

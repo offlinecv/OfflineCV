@@ -20,7 +20,7 @@ off a ready invocation.
 
 ## Repo facts (offlinecv)
 
-- **Repo:** `offlinecv/OfflineCV`, GitHub-only (no Linear). All grouping is
+- **Repo:** `116-Labs/OfflineCV`, GitHub-only (no Linear). All grouping is
   native GitHub: sub-issues via `gh api .../sub_issues`, dependency order via
   `.../dependencies/blocked_by`, board via `gh project`.
 - **This skill only creates/links issues** — no branch, no commit, no PR. The
@@ -62,7 +62,7 @@ CHILDREN=($(printf '%s' "$RAW_LIST" | tr ',' ' ' | tr -s ' ' | sed 's/#//g'))
 
 Resolve the repo once:
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # 116-Labs/OfflineCV
 OWNER="${REPO%%/*}"
 ```
 

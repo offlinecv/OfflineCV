@@ -57,7 +57,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, relative, sep } from "node:path";
 
-const REPO = "offlinecv/OfflineCV";
+const REPO = "116-Labs/OfflineCV";
 const BASELINE_DIR = "src/lib/heuristics";
 const FIXTURE_ROOT = "tests/fixtures/pdfs";
 

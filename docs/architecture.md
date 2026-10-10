@@ -30,7 +30,7 @@ Read the table below, and watch a real session in devtools before you write
 down a number.
 
 There is **no BYOK cloud-LLM provider in the tree**. A few docblocks mention
-one; it is unbuilt ([#320](https://github.com/offlinecv/OfflineCV/issues/320)).
+one; it is unbuilt ([#320](https://github.com/116-Labs/OfflineCV/issues/320)).
 Don't describe a cloud model path as if it ships.
 
 ## The parse cascade
@@ -105,7 +105,7 @@ README covers several of them in more detail:
 ## Making your first change
 
 1. Pick something from the [open, unclaimed `good first issue`
-   list](https://github.com/offlinecv/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee+-label%3A%22status%3Aclaimed%22)
+   list](https://github.com/116-Labs/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee+-label%3A%22status%3Aclaimed%22)
    and comment asking to be assigned, then wait for a maintainer to assign it
    before you start —
    [Claiming an issue](../CONTRIBUTING.md#claiming-an-issue) explains why the

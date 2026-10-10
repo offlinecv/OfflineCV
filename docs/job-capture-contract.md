@@ -4,10 +4,10 @@
 extension, a bookmarklet, a script that converts another tracker's export. You do not need to read
 the source to implement this. If a rule here and the code disagree, that is a bug; file it.
 
-**Status:** version 2. Introduced in [#693](https://github.com/offlinecv/OfflineCV/issues/693);
-extended in [#719](https://github.com/offlinecv/OfflineCV/issues/719) with the six posting facts,
-and in [#745](https://github.com/offlinecv/OfflineCV/issues/745) with `origin` and
-[#746](https://github.com/offlinecv/OfflineCV/issues/746) with `aliasUrls` — no version bump for
+**Status:** version 2. Introduced in [#693](https://github.com/116-Labs/OfflineCV/issues/693);
+extended in [#719](https://github.com/116-Labs/OfflineCV/issues/719) with the six posting facts,
+and in [#745](https://github.com/116-Labs/OfflineCV/issues/745) with `origin` and
+[#746](https://github.com/116-Labs/OfflineCV/issues/746) with `aliasUrls` — no version bump for
 either; see §8 and §9.
 Implemented by `src/lib/storage/job-record-contract.ts` (validation),
 `src/lib/storage/job-url.ts` (identity), and `src/lib/storage/capture.ts` (the write path).

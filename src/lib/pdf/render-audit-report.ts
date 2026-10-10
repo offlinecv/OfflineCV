@@ -36,7 +36,7 @@ import { formatJsonResumeLocation } from "./to-json-resume.ts";
 import { APP_VERSION } from "../version.ts";
 
 /** Where the artifact points readers back to (branded footer). */
-const APP_URL = "github.com/offlinecv/OfflineCV";
+const APP_URL = "github.com/116-Labs/OfflineCV";
 
 // ── Page geometry (points) ────────────────────────────────────────────────────
 
