@@ -299,7 +299,7 @@ jobs:
 
       - name: Resolve the conflicts
         if: steps.prep.outputs.agent == 'true'
-        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
+        uses: anthropics/claude-code-action@cab360f6565aa35a51d6ce9e43f1f4287c0a32ea # v1.0.241
         env:
           # Telemetry hosts are blocked anyway; skip them instead of retrying.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
