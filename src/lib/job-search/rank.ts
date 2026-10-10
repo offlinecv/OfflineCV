@@ -221,6 +221,7 @@ export function rankPostings(
       coverage,
       terms: extracted.all,
       nounsDropped: extracted.nounsDropped,
+      eligibility: extracted.eligibility,
     };
     // Extract compensation ONCE here (#564) — the point downstream of hydration
     // where every posting's `description` is guaranteed present regardless of

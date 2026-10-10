@@ -47,7 +47,7 @@ import {
   trackJdSemanticFailed,
   type JdSemanticFailureReasonClass,
 } from "../../analytics.ts";
-import { extractJdTerms } from "../extract-jd-terms.ts";
+import { extractEligibility, extractJdTerms } from "../extract-jd-terms.ts";
 import { computeCoverage } from "../coverage.ts";
 import type { JdMatchResult, SemanticMatchSummary } from "../types.ts";
 import { isAbortError } from "./abort.ts";
@@ -181,7 +181,12 @@ export async function runLlmMatch(
     // rather than showing the user a semantic verdict list that reflects a
     // run they already superseded.
     if (signal?.aborted) return keywordMatch(jdText, parsed);
-    return { path: "semantic", verdicts, summary: summarize(verdicts) };
+    return {
+      path: "semantic",
+      verdicts,
+      summary: summarize(verdicts),
+      eligibility: extractEligibility(jdText),
+    };
   } catch (err) {
     if (isAbortError(err) && signal?.aborted) {
       // OUR cancellation — expected control flow, not a failure. Do NOT log —
@@ -270,5 +275,6 @@ function keywordMatch(
     coverage,
     terms: extracted.all,
     nounsDropped: extracted.nounsDropped,
+    eligibility: extracted.eligibility,
   };
 }

@@ -3,6 +3,7 @@
 
 export { extractJdTerms, stripBoilerplate } from "./extract-jd-terms.ts";
 export type {
+  EligibilityFinding,
   ExtractedTerm,
   ExtractJdTermsResult,
   ExtractOptions,

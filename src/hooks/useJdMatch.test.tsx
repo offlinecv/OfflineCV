@@ -67,6 +67,11 @@ const JD_TEXT =
   "We are hiring a platform engineer. You will work with Kubernetes, " +
   "Terraform, and Go to run our production infrastructure.";
 
+/** A JD whose only content is eligibility language: `extractJdTerms` yields
+ *  zero terms but one `no-sponsorship` finding (#793). */
+const ELIGIBILITY_ONLY_JD =
+  "We are unable to sponsor employment visas for this position.";
+
 const SPARSE_RESUME: HeuristicParsedResume = {
   skills: ["React"],
   experience: [
@@ -423,6 +428,25 @@ describe("useJdMatch — keyword fast path (no engine touched)", () => {
     flushDebounce();
     expectKeywordReady();
   });
+
+  it("keyword: a JD with only eligibility language (no skill/noun terms) still reaches ready, NOT idle (#1175)", async () => {
+    // `extractJdTerms` on this text returns an empty `all` but a populated
+    // `eligibility` — the #793 silent-drop the eligibility feature exists to
+    // fix. The old `extracted.all.length === 0` guard alone nulled out
+    // `keywordResult`, so `PasteJdPanel`'s `{displayed && <JdMatch .../>}`
+    // rendered nothing for exactly this JD.
+    await mount({
+      parsed: SPARSE_RESUME,
+      jdText: ELIGIBILITY_ONLY_JD,
+    });
+    flushDebounce();
+    expectKeywordReady();
+    if (latestStatus.kind !== "ready") throw new Error("unreachable");
+    if (latestStatus.result.path !== "keyword") throw new Error("unreachable");
+    const eligibility = latestStatus.result.eligibility ?? [];
+    expect(eligibility).toHaveLength(1);
+    expect(eligibility[0].kind).toBe("no-sponsorship");
+  });
 });
 
 describe("useJdMatch — semantic path (opt-in + WebGPU available)", () => {
@@ -487,6 +511,24 @@ describe("useJdMatch — semantic path (opt-in + WebGPU available)", () => {
       await runPromise;
     });
     expect(latestStatus).toEqual({ kind: "ready", result: semanticResult });
+  });
+
+  it("an eligibility-only JD (no terms to judge) stays on the keyword arm and never loads the engine", async () => {
+    await mount({
+      parsed: SPARSE_RESUME,
+      jdText: ELIGIBILITY_ONLY_JD,
+      semanticOptIn: true,
+    });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    expectKeywordReady();
+    if (latestStatus.kind !== "ready") throw new Error("unreachable");
+    if (latestStatus.result.path !== "keyword") throw new Error("unreachable");
+    expect(latestStatus.result.terms).toEqual([]);
+    expect(latestStatus.result.eligibility?.map((f) => f.kind)).toEqual([
+      "no-sponsorship",
+    ]);
   });
 
   it("semantic infrastructure rejection with a live keyword result → ready(keyword), NOT error", async () => {
@@ -1218,6 +1260,21 @@ describe("useJdMatch — jd_match_path_selected telemetry (#206)", () => {
     await flushMicrotasks();
 
     expect(trackPathSelectedMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fire for an eligibility-only JD — no arm matched anything, and keyword/available would read as a degraded semantic run", async () => {
+    webgpu = "available";
+    await mount({
+      parsed: SPARSE_RESUME,
+      jdText: ELIGIBILITY_ONLY_JD,
+      semanticOptIn: true,
+    });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(latestStatus.kind).toBe("ready");
+    expect(trackPathSelectedMock).not.toHaveBeenCalled();
   });
 
   it("does not fire while idle (empty JD)", async () => {
